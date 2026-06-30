@@ -101,7 +101,7 @@ def send_discord_notification(title, desc, img_url=None):
 
 def post_to_facebook(message, image_url):
     """ ෆේස්බුක් පේජ් එකට පින්තූරය සහ විස්තරය පෝස්ට් කිරීම """
-    url = f"[https://graph.facebook.com/v20.0/](https://graph.facebook.com/v20.0/){FB_PAGE_ID}/photos"
+    url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
     params = {
         'url': image_url,
         'caption': message,
