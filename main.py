@@ -11,9 +11,9 @@ from threading import Thread
 
 # ================= CONFIG (YOUR DATA) =================
 FB_PAGE_ID = "1243828092139012"
-FB_ACCESS_TOKEN = "PASTE_NEW_FB_TOKEN_HERE"
+FB_ACCESS_TOKEN = "EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT"
 
-GEMINI_API_KEY = "PASTE_NEW_GEMINI_KEY_HERE"
+GEMINI_API_KEY = "AQ.Ab8RN6KbzrhhZ0gfAfBDFeWzsUuECcEcVAu7JkRFW6-sVh9CoQ"
 
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1521532656825929911/r_p09BIeETgtrGdk3QsdHb5WglQNSqwKrHTWpCtvmA7n-HyTGKhQWZOz65Zpf0OE58iu"
 
@@ -100,7 +100,7 @@ def generate_image(prompt):
 # ================= DISCORD =================
 def log(title, msg):
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={
+        requests.post(https://discord.com/api/webhooks/1521532656825929911/r_p09BIeETgtrGdk3QsdHb5WglQNSqwKrHTWpCtvmA7n-HyTGKhQWZOz65Zpf0OE58iu, json={
             "embeds":[{"title":title,"description":msg[:3000],"color":3447003}]
         })
     except:
@@ -108,12 +108,12 @@ def log(title, msg):
 
 # ================= FACEBOOK =================
 def post_fb(caption, image_url):
-    url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
+    url = f"https://graph.facebook.com/v20.0/{1243828092139012}/photos"
 
     return requests.post(url, data={
         "caption": caption,
         "url": image_url,
-        "access_token": FB_ACCESS_TOKEN
+        "access_token": EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT
     }).json()
 
 # ================= COMMENT BOT =================
@@ -121,7 +121,7 @@ def comment(post_id):
     try:
         r = requests.get(
             f"https://graph.facebook.com/v20.0/{post_id}/comments",
-            params={"access_token": FB_ACCESS_TOKEN}
+            params={"access_token": EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT}
         ).json()
 
         if "data" not in r:
@@ -142,7 +142,7 @@ def comment(post_id):
                 f"https://graph.facebook.com/v20.0/{cid}/comments",
                 data={
                     "message": random.choice(replies),
-                    "access_token": FB_ACCESS_TOKEN
+                    "access_token": EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT
                 }
             )
 
