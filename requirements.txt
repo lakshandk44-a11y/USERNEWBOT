@@ -1,4 +1,4 @@
 requests
+feedparser
 pytz
 flask
-feedparser
