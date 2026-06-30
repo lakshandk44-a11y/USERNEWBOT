@@ -173,7 +173,7 @@ if __name__ == "__main__":
     while True:
         us_now = get_us_time()
         # ඇමරිකාවේ වේලාවෙන් උදේ 6ට 7ත් අතර කාලයේදී ජොබ් එක ක්‍රියාත්මක කරන්න
-        if us_now.hour == 6 and us_now.minute < 5:
+        if True: 
             job()
             # ඊළඟ දවස වෙනකන් ඉන්න (පැය 23ක්)
             time.sleep(82800)
