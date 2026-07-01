@@ -34,8 +34,7 @@ def now():
     return datetime.now(tz)
 
 def is_6am():
-    t = now()
-    return t.hour == 6 and t.minute < 5
+    return True
 
 def reset_time():
     t = now()
