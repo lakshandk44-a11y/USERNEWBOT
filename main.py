@@ -35,7 +35,7 @@ def now():
 
 def is_6am():
     t = now()
-    return t.hour == 2 and t.minute < 5
+    return t.hour == 3 and t.minute >= 10 and t.minute < 15
 
 def reset_time():
     t = now()
@@ -151,7 +151,7 @@ def comment(post_id):
 
 # ================= SLOTS =================
 def slots():
-    return [9000,7*3600,9*3600,11*3600,13*3600,15*3600,17*3600,19*3600,21*3600,22*3600,23*3600]
+    return [0, 60, 120, 180, 240, 300, 360, 420, 480, 540]
 
 # ================= MAIN BOT =================
 def run_bot():
