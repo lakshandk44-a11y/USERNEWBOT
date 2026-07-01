@@ -17,9 +17,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # ================= GLOBAL =================
-latest_post_id = None
-seen_titles = set()
 post_queue = []
+seen_titles = set()
+
+# track replied comments
+replied_comments = set()
 
 # ================= FLASK =================
 app = Flask(__name__)
@@ -109,8 +111,7 @@ Return ONLY JSON:
 
         return json.loads(text.strip())
 
-    except Exception as e:
-        log(f"AI error: {e}")
+    except:
         return {
             "caption": f"🔥 Breaking: {title}",
             "image_prompt": "dark cinematic news"
@@ -142,7 +143,7 @@ def is_safe(text):
     bad_words = ["death", "kill", "terror", "rape"]
     return not any(b in text.lower() for b in bad_words)
 
-# ================= QUEUE BUILDER =================
+# ================= QUEUE =================
 def build_queue():
     global post_queue
 
@@ -152,9 +153,9 @@ def build_queue():
         if is_safe(n["title"] + n["desc"]):
             post_queue.append(n)
 
-# ================= WORKER =================
+# ================= WORKER (POST ENGINE) =================
 def worker():
-    global latest_post_id, post_queue
+    global post_queue
 
     while True:
         try:
@@ -167,43 +168,77 @@ def worker():
             content = ai_generate(item["title"], item["desc"])
             img = generate_image(content["image_prompt"])
 
-            res = post_fb(content["caption"], img)
+            post_fb(content["caption"], img)
 
-            if "id" in res:
-                latest_post_id = res["id"]
-                log(f"Posted: {content['caption']}")
-            else:
-                log(f"Failed: {res}")
+            log(f"Posted: {content['caption']}")
 
-            time.sleep(random.randint(3600, 7200))  # 1–2 hours delay
+            time.sleep(random.randint(3600, 7200))
 
         except Exception as e:
             log(f"Worker error: {e}")
             time.sleep(5)
 
-# ================= COMMENT BOT =================
+# ================= COMMENT BOT (REAL ENGAGEMENT) =================
 def comment_loop():
-    global latest_post_id
+    global replied_comments
 
     while True:
         try:
-            if latest_post_id:
-                requests.post(
-                    f"https://graph.facebook.com/v20.0/{latest_post_id}/comments",
-                    data={
-                        "message": random.choice([
-                            "Thanks 🙌",
-                            "Interesting!",
-                            "Good update 👍",
-                            "What do you think?"
-                        ]),
-                        "access_token": FB_ACCESS_TOKEN
-                    }
-                )
-        except:
-            pass
+            # 1. get latest page posts
+            posts = requests.get(
+                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/posts",
+                params={"access_token": FB_ACCESS_TOKEN}
+            ).json()
 
-        time.sleep(900)
+            if "data" not in posts:
+                time.sleep(30)
+                continue
+
+            for post in posts["data"][:5]:
+
+                post_id = post["id"]
+
+                # 2. get comments
+                comments = requests.get(
+                    f"https://graph.facebook.com/v20.0/{post_id}/comments",
+                    params={"access_token": FB_ACCESS_TOKEN}
+                ).json()
+
+                if "data" not in comments:
+                    continue
+
+                for c in comments["data"]:
+
+                    comment_id = c["id"]
+
+                    # avoid duplicate replies
+                    if comment_id in replied_comments:
+                        continue
+
+                    replied_comments.add(comment_id)
+
+                    reply = random.choice([
+                        "Thanks for your comment 🙌",
+                        "Appreciate your thoughts 👍",
+                        "Interesting point 🔥",
+                        "Good opinion ❤️",
+                        "Thanks for engaging!"
+                    ])
+
+                    requests.post(
+                        f"https://graph.facebook.com/v20.0/{comment_id}/comments",
+                        data={
+                            "message": reply,
+                            "access_token": FB_ACCESS_TOKEN
+                        }
+                    )
+
+                    time.sleep(10)
+
+        except Exception as e:
+            log(f"Comment error: {e}")
+
+        time.sleep(60)
 
 # ================= SCHEDULER =================
 def scheduler():
