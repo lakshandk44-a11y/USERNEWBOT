@@ -54,7 +54,36 @@ TIME_SLOTS = [
 posted_slots = set()
 seen_comments = set()
 
-# ================= LOG (UPDATED BEAUTY FORMAT) =================
+# ================= SCENIC IMAGE SLOTS =================
+SCENIC_SLOTS = [
+    (7, 0),
+    (9, 0),
+    (11, 0),
+    (14, 52),
+    (15, 0),
+    (17, 0),
+    (19, 0),
+    (21, 0),
+    (22, 30),
+    (23, 45),
+]
+
+posted_scenic_slots = set()
+
+SCENIC_PLACES = [
+    "Grand Canyon, USA",
+    "Yellowstone National Park",
+    "Yosemite National Park",
+    "Golden Gate Bridge, San Francisco",
+    "New York City skyline at night",
+    "Hawaii tropical beach sunset",
+    "Alaska snowy mountains landscape",
+    "Antelope Canyon glowing light beams",
+    "Route 66 desert road cinematic view",
+    "Chicago skyline reflections on river"
+]
+
+# ================= LOG =================
 def log(msg):
     print(msg)
     try:
@@ -67,8 +96,6 @@ def log(msg):
 {msg}
 
 ⏰ Time: {now().strftime('%Y-%m-%d %H:%M:%S')}
-
-────────────────────
 """
             })
     except:
@@ -88,12 +115,11 @@ def get_news():
                 "desc": getattr(e, "summary", e.title)
             })
         return items
-
     except Exception as e:
         log(f"News error: {e}")
         return []
 
-# ================= SAFE GEMINI =================
+# ================= GEMINI NEWS AI =================
 def ai_generate(title, desc):
     for attempt in range(2):
         try:
@@ -102,21 +128,15 @@ def ai_generate(title, desc):
             prompt = f"""
 Create viral Facebook news caption + image prompt.
 
-IMPORTANT:
-- Add engaging caption
-- Add 3-6 hashtags at the end
-- Style: dark cinematic realistic news tone
-- NOT cartoon
-
-News:
-{title}
-{desc}
-
-Return ONLY JSON:
+Return JSON:
 {{
  "caption": "...",
  "image_prompt": "..."
 }}
+
+News:
+{title}
+{desc}
 """
 
             r = requests.post(url, json={
@@ -126,8 +146,6 @@ Return ONLY JSON:
             data = r.json()
 
             if "candidates" not in data:
-                log(f"AI FAIL: {data}")
-                time.sleep(1)
                 continue
 
             text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -137,28 +155,46 @@ Return ONLY JSON:
 
             result = json.loads(text.strip())
 
-            if "#" not in result["caption"]:
-                result["caption"] += "\n\n#BreakingNews #WorldNews #Update #Trending"
-
             return result
 
-        except Exception as e:
-            log(f"AI ERROR (attempt {attempt+1}): {e}")
+        except:
             time.sleep(1)
 
     return fallback(title)
 
-# ================= FALLBACK =================
 def fallback(title):
     return {
-        "caption": f"🚨 Breaking Update: {title}\n\n#BreakingNews #WorldNews #Update #Trending",
-        "image_prompt": "dark cinematic realistic news photography, dramatic lighting, ultra detailed"
+        "caption": f"🚨 Breaking Update: {title}\n\n#BreakingNews #WorldNews",
+        "image_prompt": "dark cinematic news photography, ultra realistic"
     }
 
-# ================= IMAGE GENERATION =================
+# ================= SCENIC AI GENERATOR =================
+def scenic_generate():
+    place = random.choice(SCENIC_PLACES)
+
+    captions = [
+        f"✨ Discover the breathtaking beauty of {place}",
+        f"🌍 Nature’s masterpiece: {place}",
+        f"📍 A stunning view of {place}",
+        f"🔥 Experience the magic of {place}"
+    ]
+
+    hashtags = "#Travel #Nature #USA #BeautifulPlaces #Photography #Explore"
+
+    prompt = f"""
+Ultra realistic cinematic photo of {place},
+golden hour lighting, 8k, professional photography, breathtaking view
+"""
+
+    return {
+        "caption": random.choice(captions) + "\n\n" + hashtags,
+        "image_prompt": prompt
+    }
+
+# ================= IMAGE =================
 def generate_image(prompt):
     safe = urllib.parse.quote(
-        prompt + ", cinematic, realistic, dramatic lighting, news editorial style, ultra detailed, 4k"
+        prompt + ", ultra realistic, cinematic, 4k, professional photography"
     )
     return f"https://image.pollinations.ai/prompt/{safe}"
 
@@ -173,15 +209,7 @@ def post_fb(caption, image_url):
             "access_token": FB_ACCESS_TOKEN
         })
 
-        result = res.json()
-
-        log(f"""
-📤 FACEBOOK POST RESULT
-────────────────────
-{result}
-""")
-
-        return result
+        return res.json()
 
     except Exception as e:
         log(f"FB ERROR: {e}")
@@ -221,9 +249,9 @@ def comment_bot():
 
                     reply = random.choice([
                         "Thanks 🙌",
-                        "Interesting point 👍",
-                        "Good observation 👀",
-                        "Appreciate your view ❤️"
+                        "Interesting 👍",
+                        "Good point 👀",
+                        "Appreciate it ❤️"
                     ])
 
                     requests.post(
@@ -241,43 +269,55 @@ def comment_bot():
 
         time.sleep(60)
 
-# ================= SLOT CHECK =================
-def should_post(slot):
-    t = now()
-    h, m = TIME_SLOTS[slot]
-    return t.hour == h and t.minute == m
-
-# ================= MAIN SCHEDULER =================
+# ================= SCHEDULER =================
 def scheduler():
-    global posted_slots
+    global posted_slots, posted_scenic_slots
 
     while True:
         try:
             if reset_time():
                 posted_slots = set()
+                posted_scenic_slots = set()
                 log("NEW DAY RESET")
 
+            # -------- NEWS POSTS --------
             for i in range(len(TIME_SLOTS)):
                 if i in posted_slots:
                     continue
 
-                if should_post(i):
+                h, m = TIME_SLOTS[i]
+                if now().hour == h and now().minute == m:
+
                     news = get_news()
                     if not news:
                         continue
 
                     pick = random.choice(news)
-
                     ai = ai_generate(pick["title"], pick["desc"])
                     img = generate_image(ai["image_prompt"])
 
                     res = post_fb(ai["caption"], img)
 
                     if "id" in res:
-                        log(f"POSTED SLOT {i+1}/10")
                         posted_slots.add(i)
-                    else:
-                        log(f"POST FAILED SLOT {i+1}: {res}")
+                        log(f"NEWS POST SLOT {i+1}")
+
+            # -------- SCENIC POSTS --------
+            for i in range(len(SCENIC_SLOTS)):
+                if i in posted_scenic_slots:
+                    continue
+
+                h, m = SCENIC_SLOTS[i]
+                if now().hour == h and now().minute == m:
+
+                    scenic = scenic_generate()
+                    img = generate_image(scenic["image_prompt"])
+
+                    res = post_fb(scenic["caption"], img)
+
+                    if "id" in res:
+                        posted_scenic_slots.add(i)
+                        log(f"SCENIC POST SLOT {i+1}")
 
             time.sleep(20)
 
