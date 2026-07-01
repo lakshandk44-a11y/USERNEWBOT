@@ -18,25 +18,27 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # ================= GLOBAL =================
 latest_post_id = None
+seen_titles = set()
+post_queue = []
 
 # ================= FLASK =================
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "🤖 Bot is Running"
+    return "Bot Running"
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ================= TIME =================
+# ================= TIME (NEW YORK) =================
 tz = pytz.timezone("America/New_York")
 
 def now():
     return datetime.now(tz)
 
-def is_6am():
+def is_start_time():
     t = now()
     return t.hour == 6 and t.minute < 5
 
@@ -44,29 +46,48 @@ def reset_time():
     t = now()
     return t.hour == 0 and t.minute < 5
 
+# ================= LOG =================
+def log(msg):
+    print(msg)
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+    except:
+        pass
+
 # ================= NEWS =================
 def get_news():
-    feed = feedparser.parse(
-        "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"
-    )
-    return [
-        {"title": e.title, "desc": getattr(e, "summary", e.title)}
-        for e in feed.entries[:20]
-    ]
+    try:
+        feed = feedparser.parse(
+            "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"
+        )
 
-# ================= SCORE =================
-def score(text):
-    keys = ["war", "breaking", "crisis", "trump", "china", "nasa", "shock", "explosion"]
-    return sum(2 for k in keys if k in text.lower()) + len(text) / 120
+        items = []
 
-def pick_top(news):
-    return sorted(news, key=lambda x: score(x["title"] + x["desc"]), reverse=True)[:10]
+        for e in feed.entries[:30]:
+            title = e.title
+
+            if title in seen_titles:
+                continue
+
+            seen_titles.add(title)
+
+            items.append({
+                "title": title,
+                "desc": getattr(e, "summary", title)
+            })
+
+        return items
+
+    except Exception as e:
+        log(f"News error: {e}")
+        return []
 
 # ================= AI =================
 def ai_generate(title, desc):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
 
-    prompt = f"""
+        prompt = f"""
 Create viral Facebook caption + image prompt.
 
 News:
@@ -76,11 +97,10 @@ News:
 Return ONLY JSON:
 {{
  "caption": "...",
- "image_prompt": "dark cinematic news style"
+ "image_prompt": "cinematic dramatic news style"
 }}
 """
 
-    try:
         r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
         text = r.json()['candidates'][0]['content']['parts'][0]['text']
 
@@ -89,133 +109,118 @@ Return ONLY JSON:
 
         return json.loads(text.strip())
 
-    except:
+    except Exception as e:
+        log(f"AI error: {e}")
         return {
-            "caption": f"🔥 Breaking News: {title}",
-            "image_prompt": "dark cinematic news scene"
+            "caption": f"🔥 Breaking: {title}",
+            "image_prompt": "dark cinematic news"
         }
 
 # ================= IMAGE =================
 def generate_image(prompt):
     return f"https://image.pollinations.ai/p/{urllib.parse.quote(prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
 
-# ================= LOG =================
-def log(msg):
-    try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
-    except:
-        pass
-
 # ================= FACEBOOK POST =================
 def post_fb(caption, image_url):
-    url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
+    try:
+        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
 
-    return requests.post(url, data={
-        "caption": caption,
-        "url": image_url,
-        "access_token": FB_ACCESS_TOKEN
-    }).json()
+        res = requests.post(url, data={
+            "caption": caption,
+            "url": image_url,
+            "access_token": FB_ACCESS_TOKEN
+        }).json()
+
+        return res
+
+    except Exception as e:
+        log(f"FB error: {e}")
+        return {"error": str(e)}
+
+# ================= SAFE FILTER =================
+def is_safe(text):
+    bad_words = ["death", "kill", "terror", "rape"]
+    return not any(b in text.lower() for b in bad_words)
+
+# ================= QUEUE BUILDER =================
+def build_queue():
+    global post_queue
+
+    news = get_news()
+
+    for n in news:
+        if is_safe(n["title"] + n["desc"]):
+            post_queue.append(n)
+
+# ================= WORKER =================
+def worker():
+    global latest_post_id, post_queue
+
+    while True:
+        try:
+            if len(post_queue) == 0:
+                time.sleep(10)
+                continue
+
+            item = post_queue.pop(0)
+
+            content = ai_generate(item["title"], item["desc"])
+            img = generate_image(content["image_prompt"])
+
+            res = post_fb(content["caption"], img)
+
+            if "id" in res:
+                latest_post_id = res["id"]
+                log(f"Posted: {content['caption']}")
+            else:
+                log(f"Failed: {res}")
+
+            time.sleep(random.randint(3600, 7200))  # 1–2 hours delay
+
+        except Exception as e:
+            log(f"Worker error: {e}")
+            time.sleep(5)
 
 # ================= COMMENT BOT =================
-def comment(post_id):
-    try:
-        r = requests.get(
-            f"https://graph.facebook.com/v20.0/{post_id}/comments",
-            params={"access_token": FB_ACCESS_TOKEN}
-        ).json()
-
-        if "data" not in r:
-            return
-
-        replies = [
-            "Thanks for sharing your thoughts! 🙌",
-            "That's an interesting point.",
-            "We appreciate your comment ❤️",
-            "Thanks for joining the discussion!",
-            "Glad to hear your opinion."
-        ]
-
-        for c in r["data"][:2]:
-            cid = c["id"]
-
-            requests.post(
-                f"https://graph.facebook.com/v20.0/{cid}/comments",
-                data={
-                    "message": random.choice(replies),
-                    "access_token": FB_ACCESS_TOKEN
-                }
-            )
-
-            time.sleep(20)
-
-    except:
-        pass
-
-# ================= COMMENT LOOP =================
 def comment_loop():
     global latest_post_id
 
     while True:
-        if latest_post_id:
-            try:
-                comment(latest_post_id)
-            except Exception as e:
-                log(f"Comment Error: {e}")
+        try:
+            if latest_post_id:
+                requests.post(
+                    f"https://graph.facebook.com/v20.0/{latest_post_id}/comments",
+                    data={
+                        "message": random.choice([
+                            "Thanks 🙌",
+                            "Interesting!",
+                            "Good update 👍",
+                            "What do you think?"
+                        ]),
+                        "access_token": FB_ACCESS_TOKEN
+                    }
+                )
+        except:
+            pass
 
         time.sleep(900)
 
-# ================= SLOTS =================
-def slots():
-    return [
-        0, 2 * 3600, 4 * 3600, 6 * 3600,
-        8 * 3600, 10 * 3600, 12 * 3600,
-        14 * 3600, 16 * 3600, 17 * 3600,
-    ]
-
-# ================= MAIN BOT =================
-def run_bot():
-    global latest_post_id
-
+# ================= SCHEDULER =================
+def scheduler():
     running = False
 
     while True:
         try:
-            t = now()
-
             if reset_time():
                 running = False
 
-            if is_6am() and not running:
+            if is_start_time() and not running:
                 running = True
-                log("🚀 Bot Started")
-
-                news = pick_top(get_news())
-                base = time.time()
-                s = slots()
-
-                for i, n in enumerate(news):
-
-                    while time.time() < base + s[i]:
-                        time.sleep(20)
-
-                    content = ai_generate(n["title"], n["desc"])
-                    img = generate_image(content["image_prompt"])
-
-                    res = post_fb(content["caption"], img)
-
-                    if "id" in res:
-                        latest_post_id = res["id"]
-                        log(f"✅ Posted: {content['caption']}")
-                    else:
-                        log(f"❌ Failed: {res}")
-
-                    time.sleep(60)
-
-                log("🏁 Cycle Completed")
+                log("🚀 New York Cycle Started")
+                build_queue()
 
         except Exception as e:
-            log(f"❌ Error: {str(e)}")
-            time.sleep(10)
+            log(f"Scheduler error: {e}")
 
         time.sleep(30)
 
@@ -223,4 +228,5 @@ def run_bot():
 if __name__ == "__main__":
     Thread(target=run_server, daemon=True).start()
     Thread(target=comment_loop, daemon=True).start()
-    run_bot()
+    Thread(target=worker, daemon=True).start()
+    scheduler()
