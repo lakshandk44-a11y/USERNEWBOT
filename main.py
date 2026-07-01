@@ -82,7 +82,7 @@ def get_news():
         log(f"News error: {e}")
         return []
 
-# ================= AI CAPTION =================
+# ================= AI =================
 def ai_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
@@ -109,13 +109,14 @@ Return ONLY JSON:
 
         return json.loads(text.strip())
 
-    except:
+    except Exception as e:
+        log(f"AI error: {e}")
         return {
             "caption": f"🔥 Breaking: {title}",
             "image_prompt": "news scene"
         }
 
-# ================= 🎨 IMPROVED IMAGE GENERATOR =================
+# ================= IMAGE =================
 def generate_image(prompt):
     enhanced_prompt = f"""
 ultra cinematic news illustration, high quality AI artwork,
@@ -128,7 +129,7 @@ Scene: {prompt}
 
     return f"https://image.pollinations.ai/p/{urllib.parse.quote(enhanced_prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
 
-# ================= FACEBOOK POST =================
+# ================= FACEBOOK POST (FIXED) =================
 def post_fb(caption, image_url):
     try:
         url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
@@ -137,12 +138,16 @@ def post_fb(caption, image_url):
             "caption": caption,
             "url": image_url,
             "access_token": FB_ACCESS_TOKEN
-        }).json()
+        })
 
-        return res
+        result = res.json()
+
+        log(f"FB RESPONSE: {result}")  # 🔥 IMPORTANT DEBUG
+
+        return result
 
     except Exception as e:
-        log(f"FB error: {e}")
+        log(f"FB ERROR: {e}")
         return {"error": str(e)}
 
 # ================= SAFE FILTER =================
@@ -175,9 +180,13 @@ def worker():
             content = ai_generate(item["title"], item["desc"])
             img = generate_image(content["image_prompt"])
 
-            post_fb(content["caption"], img)
+            res = post_fb(content["caption"], img)
 
-            log(f"Posted: {content['caption']}")
+            # 🔥 FIX: proper success check
+            if "id" in res:
+                log(f"✅ POSTED SUCCESS: {res['id']}")
+            else:
+                log(f"❌ POST FAILED: {res}")
 
             time.sleep(random.randint(3600, 7200))
 
