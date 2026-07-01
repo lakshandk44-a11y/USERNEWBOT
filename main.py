@@ -40,8 +40,8 @@ def reset_time():
 # ================= TIME SLOTS =================
 TIME_SLOTS = [
     (6, 0),
-    (9, 54),
-    (10, 0),
+    (8, 0),
+    (10, 06),
     (12, 0),
     (14, 0),
     (16, 0),
@@ -76,20 +76,24 @@ def get_news():
                 "title": e.title,
                 "desc": getattr(e, "summary", e.title)
             })
-
         return items
 
     except Exception as e:
         log(f"News error: {e}")
         return []
 
-# ================= AI (SAFE) =================
+# ================= SAFE GEMINI =================
 def ai_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         prompt = f"""
-Create viral Facebook caption + image prompt.
+Create viral Facebook news caption + image prompt.
+
+Style:
+- dark cinematic realistic
+- NOT cartoon
+- emotional but professional
 
 News:
 {title}
@@ -108,6 +112,7 @@ Return ONLY JSON:
 
         data = r.json()
 
+        # SAFE FIX (prevents crash)
         if "candidates" not in data:
             log(f"AI FAIL: {data}")
             return fallback(title)
@@ -127,21 +132,24 @@ Return ONLY JSON:
 def fallback(title):
     return {
         "caption": f"🔥 Breaking News: {title}",
-        "image_prompt": "cinematic news illustration"
+        "image_prompt": "dark cinematic news photography, dramatic lighting, realistic, ultra detailed"
     }
 
-# ================= IMAGE =================
+# ================= IMAGE GENERATION =================
 def generate_image(prompt):
-    safe = urllib.parse.quote(prompt[:120])
-    return f"https://dummyimage.com/1080x1080/000/fff.png&text={safe}"
+    safe = urllib.parse.quote(
+        prompt + ", dark cinematic, realistic photography, news style, 4k ultra detailed"
+    )
+    return f"https://image.pollinations.ai/prompt/{safe}"
 
-# ================= FACEBOOK POST =================
+# ================= FACEBOOK POST (REAL IMAGE) =================
 def post_fb(caption, image_url):
     try:
-        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed"
+        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
 
         res = requests.post(url, data={
-            "message": caption + "\n\n" + image_url,
+            "url": image_url,
+            "caption": caption,
             "access_token": FB_ACCESS_TOKEN
         })
 
@@ -187,10 +195,9 @@ def comment_bot():
 
                     reply = random.choice([
                         "Thanks 🙌",
-                        "Interesting!",
-                        "Good point 👍",
-                        "Nice view ❤️",
-                        "Appreciate it!"
+                        "Interesting point 👍",
+                        "Good observation 👀",
+                        "Appreciate your view ❤️"
                     ])
 
                     requests.post(
@@ -241,10 +248,10 @@ def scheduler():
                     res = post_fb(ai["caption"], img)
 
                     if "id" in res:
-                        log(f"POST DONE SLOT {i+1}")
+                        log(f"POSTED SLOT {i+1}/10")
                         posted_slots.add(i)
                     else:
-                        log(f"POST FAIL SLOT {i+1}: {res}")
+                        log(f"POST FAILED SLOT {i+1}: {res}")
 
             time.sleep(20)
 
