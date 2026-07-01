@@ -5,27 +5,27 @@ import urllib.parse
 import random
 import feedparser
 import pytz
+import os
 from datetime import datetime
 from flask import Flask
 from threading import Thread
 
-# ================= CONFIG (YOUR DATA) =================
-FB_PAGE_ID = "1243828092139012"
-FB_ACCESS_TOKEN = "EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT"
+# ================= CONFIG (ENV SAFE) =================
+FB_PAGE_ID = os.getenv("FB_PAGE_ID")
+FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-GEMINI_API_KEY = "AQ.Ab8RN6KbzrhhZ0gfAfBDFeWzsUuECcEcVAu7JkRFW6-sVh9CoQ"
-
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1521532656825929911/r_p09BIeETgtrGdk3QsdHb5WglQNSqwKrHTWpCtvmA7n-HyTGKhQWZOz65Zpf0OE58iu"
-
-# ================= FLASK =================
+# ================= FLASK SERVER =================
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "🤖 FULL AUTO BOT ONLINE"
+    return "🤖 Bot is Running"
 
 def run_server():
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 # ================= TIME =================
 tz = pytz.timezone("America/New_York")
@@ -60,7 +60,7 @@ def score(text):
 def pick_top(news):
     return sorted(news, key=lambda x: score(x["title"] + x["desc"]), reverse=True)[:10]
 
-# ================= AI =================
+# ================= AI CONTENT =================
 def ai_generate(title, desc):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
 
@@ -74,7 +74,7 @@ News:
 Return ONLY JSON:
 {{
  "caption": "...",
- "image_prompt": "dark cinematic ultra realistic dramatic lighting"
+ "image_prompt": "dark cinematic dramatic lighting news style"
 }}
 """
 
@@ -93,20 +93,18 @@ Return ONLY JSON:
             "image_prompt": "dark cinematic news scene"
         }
 
-# ================= IMAGE =================
+# ================= IMAGE GENERATOR =================
 def generate_image(prompt):
     return f"https://image.pollinations.ai/p/{urllib.parse.quote(prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
 
-# ================= DISCORD =================
-def log(title, msg):
+# ================= DISCORD LOG =================
+def log(msg):
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={
-            "embeds": [{"title": title, "description": msg[:3000], "color": 3447003}]
-        })
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
     except:
         pass
 
-# ================= FACEBOOK =================
+# ================= FACEBOOK POST =================
 def post_fb(caption, image_url):
     url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
 
@@ -146,7 +144,7 @@ def comment(post_id):
                 }
             )
 
-            time.sleep(25)
+            time.sleep(20)
 
     except:
         pass
@@ -155,43 +153,49 @@ def comment(post_id):
 def slots():
     return [7*3600,9*3600,11*3600,13*3600,15*3600,17*3600,19*3600,21*3600,22*3600,23*3600]
 
-# ================= MAIN =================
+# ================= MAIN BOT =================
 def run_bot():
     running = False
 
     while True:
-        t = now()
+        try:
+            t = now()
 
-        if reset_time():
-            running = False
+            if reset_time():
+                running = False
 
-        if is_6am() and not running:
-            running = True
-            log("🚀 START", "Bot started")
+            if is_6am() and not running:
+                running = True
+                log("🚀 Bot Started")
 
-            news = pick_top(get_news())
-            base = time.time()
-            s = slots()
+                news = pick_top(get_news())
+                base = time.time()
+                s = slots()
 
-            for i, n in enumerate(news):
-                while time.time() < base + s[i]:
-                    time.sleep(20)
+                for i, n in enumerate(news):
 
-                content = ai_generate(n["title"], n["desc"])
-                img = generate_image(content["image_prompt"])
+                    while time.time() < base + s[i]:
+                        time.sleep(20)
 
-                res = post_fb(content["caption"], img)
+                    content = ai_generate(n["title"], n["desc"])
+                    img = generate_image(content["image_prompt"])
 
-                if "id" in res:
-                    pid = res["id"]
-                    log("✅ POSTED", content["caption"])
-                    comment(pid)
-                else:
-                    log("❌ FAILED", str(res))
+                    res = post_fb(content["caption"], img)
 
-                time.sleep(60)
+                    if "id" in res:
+                        pid = res["id"]
+                        log(f"✅ Posted: {content['caption']}")
+                        comment(pid)
+                    else:
+                        log(f"❌ Failed: {res}")
 
-            log("🏁 DONE", "Cycle finished")
+                    time.sleep(60)
+
+                log("🏁 Cycle Completed")
+
+        except Exception as e:
+            log(f"❌ Error: {str(e)}")
+            time.sleep(10)
 
         time.sleep(30)
 
