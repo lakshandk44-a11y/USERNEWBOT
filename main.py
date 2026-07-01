@@ -32,7 +32,7 @@ def run_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ================= TIME (NEW YORK) =================
+# ================= TIME =================
 tz = pytz.timezone("America/New_York")
 
 def now():
@@ -40,7 +40,8 @@ def now():
 
 def is_start_time():
     t = now()
-    return t.hour == 8 and t.minute == 15
+    return t.hour == 9 and t.minute == 03
+
 def reset_time():
     t = now()
     return t.hour == 0 and t.minute < 5
@@ -49,7 +50,8 @@ def reset_time():
 def log(msg):
     print(msg)
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+        if DISCORD_WEBHOOK_URL:
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
     except:
         pass
 
@@ -62,8 +64,8 @@ def get_news():
 
         items = []
 
-        for e in feed.entries[:30]:
-            title = e.title
+        for e in feed.entries[:20]:
+            title = getattr(e, "title", "No Title")
 
             if title in seen_titles:
                 continue
@@ -84,7 +86,7 @@ def get_news():
 # ================= AI =================
 def ai_generate(title, desc):
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         prompt = f"""
 Create viral Facebook caption + image prompt.
@@ -100,8 +102,14 @@ Return ONLY JSON:
 }}
 """
 
-        r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
-        text = r.json()['candidates'][0]['content']['parts'][0]['text']
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+
+        r = requests.post(url, json=payload, timeout=30)
+        data = r.json()
+
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
 
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
@@ -112,65 +120,52 @@ Return ONLY JSON:
         log(f"AI error: {e}")
         return {
             "caption": f"🔥 Breaking: {title}",
-            "image_prompt": "news scene"
+            "image_prompt": "news illustration"
         }
 
-# ================= IMAGE =================
+# ================= IMAGE (SAFE FIX) =================
 def generate_image(prompt):
-    enhanced_prompt = f"""
-ultra cinematic news illustration, high quality AI artwork,
-dramatic lighting, depth of field, emotional storytelling,
-slightly stylized realistic digital art (not cartoon),
-4k ultra detail, magazine cover quality, modern news visualization,
+    # Facebook-safe approach: stable public image generator
+    safe = urllib.parse.quote(prompt[:120])
 
-Scene: {prompt}
-"""
+    return f"https://dummyimage.com/1080x1080/000/fff.png&text={safe}"
 
-    return f"https://image.pollinations.ai/p/{urllib.parse.quote(enhanced_prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
-
-# ================= FACEBOOK POST (FIXED) =================
+# ================= FACEBOOK POST FIXED =================
 def post_fb(caption, image_url):
     try:
-        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
+        # FIX: use feed instead of /photos (avoids image validation error)
+        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed"
 
         res = requests.post(url, data={
-            "caption": caption,
-            "url": image_url,
+            "message": caption + "\n\n" + image_url,
             "access_token": FB_ACCESS_TOKEN
         })
 
         result = res.json()
-
-        log(f"FB RESPONSE: {result}")  # 🔥 IMPORTANT DEBUG
-
+        log(f"FB RESPONSE: {result}")
         return result
 
     except Exception as e:
         log(f"FB ERROR: {e}")
         return {"error": str(e)}
 
-# ================= SAFE FILTER =================
+# ================= SAFETY =================
 def is_safe(text):
     bad_words = ["death", "kill", "terror", "rape"]
     return not any(b in text.lower() for b in bad_words)
 
 # ================= QUEUE =================
 def build_queue():
-    global post_queue
-
     news = get_news()
-
     for n in news:
         if is_safe(n["title"] + n["desc"]):
             post_queue.append(n)
 
 # ================= WORKER =================
 def worker():
-    global post_queue
-
     while True:
         try:
-            if len(post_queue) == 0:
+            if not post_queue:
                 time.sleep(10)
                 continue
 
@@ -181,11 +176,10 @@ def worker():
 
             res = post_fb(content["caption"], img)
 
-            # 🔥 FIX: proper success check
             if "id" in res:
-                log(f"✅ POSTED SUCCESS: {res['id']}")
+                log(f"POST SUCCESS: {res['id']}")
             else:
-                log(f"❌ POST FAILED: {res}")
+                log(f"POST FAILED: {res}")
 
             time.sleep(random.randint(3600, 7200))
 
@@ -195,8 +189,6 @@ def worker():
 
 # ================= COMMENT BOT =================
 def comment_loop():
-    global replied_comments
-
     while True:
         try:
             posts = requests.get(
@@ -243,7 +235,7 @@ def comment_loop():
                         }
                     )
 
-                    time.sleep(10)
+                    time.sleep(5)
 
         except Exception as e:
             log(f"Comment error: {e}")
@@ -261,7 +253,7 @@ def scheduler():
 
             if is_start_time() and not running:
                 running = True
-                log("🚀 New York Cycle Started")
+                log("New York Cycle Started")
                 build_queue()
 
         except Exception as e:
