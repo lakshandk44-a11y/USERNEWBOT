@@ -16,13 +16,6 @@ FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-# ================= GLOBAL =================
-post_queue = []
-scheduled_posts = []
-seen_titles = set()
-replied_comments = set()
-posted_today = 0
-
 # ================= FLASK =================
 app = Flask(__name__)
 
@@ -44,10 +37,10 @@ def reset_time():
     t = now()
     return t.hour == 0 and t.minute < 5
 
-# ================= 10 BEST TIME SLOTS =================
+# ================= TIME SLOTS =================
 TIME_SLOTS = [
-    (9, 18),
-    (8, 0),
+    (6, 0),
+    (9, 37),
     (10, 0),
     (12, 0),
     (14, 0),
@@ -57,6 +50,9 @@ TIME_SLOTS = [
     (22, 0),
     (23, 30),
 ]
+
+posted_slots = set()
+seen_comments = set()
 
 # ================= LOG =================
 def log(msg):
@@ -75,17 +71,10 @@ def get_news():
         )
 
         items = []
-        for e in feed.entries[:30]:
-            title = getattr(e, "title", "No Title")
-
-            if title in seen_titles:
-                continue
-
-            seen_titles.add(title)
-
+        for e in feed.entries[:20]:
             items.append({
-                "title": title,
-                "desc": getattr(e, "summary", title)
+                "title": e.title,
+                "desc": getattr(e, "summary", e.title)
             })
 
         return items
@@ -94,7 +83,7 @@ def get_news():
         log(f"News error: {e}")
         return []
 
-# ================= AI =================
+# ================= AI (SAFE) =================
 def ai_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -113,10 +102,15 @@ Return ONLY JSON:
 }}
 """
 
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        r = requests.post(url, json={
+            "contents": [{"parts": [{"text": prompt}]}]
+        }, timeout=30)
 
-        r = requests.post(url, json=payload, timeout=30)
         data = r.json()
+
+        if "candidates" not in data:
+            log(f"AI FAIL: {data}")
+            return fallback(title)
 
         text = data["candidates"][0]["content"]["parts"][0]["text"]
 
@@ -126,11 +120,15 @@ Return ONLY JSON:
         return json.loads(text.strip())
 
     except Exception as e:
-        log(f"AI error: {e}")
-        return {
-            "caption": f"🔥 Breaking: {title}",
-            "image_prompt": "news illustration"
-        }
+        log(f"AI ERROR: {e}")
+        return fallback(title)
+
+# ================= FALLBACK =================
+def fallback(title):
+    return {
+        "caption": f"🔥 Breaking News: {title}",
+        "image_prompt": "cinematic news illustration"
+    }
 
 # ================= IMAGE =================
 def generate_image(prompt):
@@ -155,74 +153,8 @@ def post_fb(caption, image_url):
         log(f"FB ERROR: {e}")
         return {"error": str(e)}
 
-# ================= SAFETY =================
-def is_safe(text):
-    bad_words = ["death", "kill", "terror", "rape"]
-    return not any(b in text.lower() for b in bad_words)
-
-# ================= BUILD 10 POSTS =================
-def build_daily_posts():
-    global scheduled_posts, posted_today
-
-    scheduled_posts = []
-    posted_today = 0
-
-    news = get_news()
-
-    for n in news:
-        if len(scheduled_posts) >= 10:
-            break
-
-        if is_safe(n["title"] + n["desc"]):
-            ai = ai_generate(n["title"], n["desc"])
-            img = generate_image(ai["image_prompt"])
-
-            scheduled_posts.append({
-                "caption": ai["caption"],
-                "image": img,
-                "posted": False
-            })
-
-    log(f"Prepared {len(scheduled_posts)} posts for today")
-
-# ================= POST SCHEDULER =================
-def should_post_now(slot_index):
-    t = now()
-    h, m = TIME_SLOTS[slot_index]
-    return t.hour == h and t.minute == m
-
-# ================= WORKER =================
-def scheduler():
-    global posted_today
-
-    while True:
-        try:
-            # reset daily
-            if reset_time():
-                build_daily_posts()
-
-            # post only 10 times per day
-            if posted_today < 10 and posted_today < len(scheduled_posts):
-
-                if should_post_now(posted_today):
-                    item = scheduled_posts[posted_today]
-
-                    res = post_fb(item["caption"], item["image"])
-
-                    if "id" in res:
-                        log(f"POSTED {posted_today+1}/10")
-                        posted_today += 1
-                    else:
-                        log(f"POST FAILED: {res}")
-
-            time.sleep(20)
-
-        except Exception as e:
-            log(f"Scheduler error: {e}")
-            time.sleep(5)
-
 # ================= COMMENT BOT =================
-def comment_loop():
+def comment_bot():
     while True:
         try:
             posts = requests.get(
@@ -248,10 +180,10 @@ def comment_loop():
                 for c in comments["data"]:
                     cid = c["id"]
 
-                    if cid in replied_comments:
+                    if cid in seen_comments:
                         continue
 
-                    replied_comments.add(cid)
+                    seen_comments.add(cid)
 
                     reply = random.choice([
                         "Thanks 🙌",
@@ -272,14 +204,56 @@ def comment_loop():
                     time.sleep(5)
 
         except Exception as e:
-            log(f"Comment error: {e}")
+            log(f"COMMENT ERROR: {e}")
 
         time.sleep(60)
 
+# ================= SLOT CHECK =================
+def should_post(slot):
+    t = now()
+    h, m = TIME_SLOTS[slot]
+    return t.hour == h and t.minute == m
+
+# ================= MAIN SCHEDULER =================
+def scheduler():
+    global posted_slots
+
+    while True:
+        try:
+            if reset_time():
+                posted_slots = set()
+                log("NEW DAY RESET")
+
+            for i in range(len(TIME_SLOTS)):
+                if i in posted_slots:
+                    continue
+
+                if should_post(i):
+                    news = get_news()
+                    if not news:
+                        continue
+
+                    pick = random.choice(news)
+
+                    ai = ai_generate(pick["title"], pick["desc"])
+                    img = generate_image(ai["image_prompt"])
+
+                    res = post_fb(ai["caption"], img)
+
+                    if "id" in res:
+                        log(f"POST DONE SLOT {i+1}")
+                        posted_slots.add(i)
+                    else:
+                        log(f"POST FAIL SLOT {i+1}: {res}")
+
+            time.sleep(20)
+
+        except Exception as e:
+            log(f"SCHEDULER ERROR: {e}")
+            time.sleep(5)
+
 # ================= START =================
 if __name__ == "__main__":
-    build_daily_posts()
-
     Thread(target=run_server, daemon=True).start()
-    Thread(target=comment_loop, daemon=True).start()
+    Thread(target=comment_bot, daemon=True).start()
     scheduler()
