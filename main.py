@@ -42,7 +42,7 @@ TIME_SLOTS = [
     (6, 0),
     (8, 0),
     (10, 0),
-    (12, 23),
+    (12, 37),
     (14, 0),
     (16, 0),
     (18, 0),
@@ -54,13 +54,22 @@ TIME_SLOTS = [
 posted_slots = set()
 seen_comments = set()
 
-# ================= LOG =================
+# ================= LOG (UPDATED BEAUTY FORMAT) =================
 def log(msg):
     print(msg)
     try:
         if DISCORD_WEBHOOK_URL:
             requests.post(DISCORD_WEBHOOK_URL, json={
-                "content": f"🤖 BOT UPDATE:\n{msg}"
+                "content": f"""
+🚀 **FACEBOOK BOT UPDATE**
+
+🧠 Status:
+{msg}
+
+⏰ Time: {now().strftime('%Y-%m-%d %H:%M:%S')}
+
+────────────────────
+"""
             })
     except:
         pass
@@ -84,9 +93,9 @@ def get_news():
         log(f"News error: {e}")
         return []
 
-# ================= SAFE GEMINI (FIXED + RETRY) =================
+# ================= SAFE GEMINI =================
 def ai_generate(title, desc):
-    for attempt in range(2):  # 🔥 retry once
+    for attempt in range(2):
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
@@ -128,7 +137,6 @@ Return ONLY JSON:
 
             result = json.loads(text.strip())
 
-            # FORCE hashtags if missing
             if "#" not in result["caption"]:
                 result["caption"] += "\n\n#BreakingNews #WorldNews #Update #Trending"
 
@@ -140,11 +148,11 @@ Return ONLY JSON:
 
     return fallback(title)
 
-# ================= FALLBACK (IMPROVED) =================
+# ================= FALLBACK =================
 def fallback(title):
     return {
         "caption": f"🚨 Breaking Update: {title}\n\n#BreakingNews #WorldNews #Update #Trending",
-        "image_prompt": "dark cinematic realistic news photography, dramatic lighting, ultra detailed, editorial style"
+        "image_prompt": "dark cinematic realistic news photography, dramatic lighting, ultra detailed"
     }
 
 # ================= IMAGE GENERATION =================
@@ -166,7 +174,13 @@ def post_fb(caption, image_url):
         })
 
         result = res.json()
-        log(f"FB RESPONSE: {result}")
+
+        log(f"""
+📤 FACEBOOK POST RESULT
+────────────────────
+{result}
+""")
+
         return result
 
     except Exception as e:
