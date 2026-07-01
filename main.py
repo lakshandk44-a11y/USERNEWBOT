@@ -10,13 +10,16 @@ from datetime import datetime
 from flask import Flask
 from threading import Thread
 
-# ================= CONFIG (ENV SAFE) =================
+# ================= CONFIG =================
 FB_PAGE_ID = os.getenv("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-# ================= FLASK SERVER =================
+# ================= GLOBAL =================
+latest_post_id = None
+
+# ================= FLASK =================
 app = Flask(__name__)
 
 @app.route("/")
@@ -35,7 +38,7 @@ def now():
 
 def is_6am():
     t = now()
-    return t.hour == 3 and t.minute >= 10 and t.minute < 15
+    return t.hour == 6 and t.minute < 5
 
 def reset_time():
     t = now()
@@ -46,13 +49,12 @@ def get_news():
     feed = feedparser.parse(
         "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"
     )
-
     return [
         {"title": e.title, "desc": getattr(e, "summary", e.title)}
         for e in feed.entries[:20]
     ]
 
-# ================= VIRAL SCORE =================
+# ================= SCORE =================
 def score(text):
     keys = ["war", "breaking", "crisis", "trump", "china", "nasa", "shock", "explosion"]
     return sum(2 for k in keys if k in text.lower()) + len(text) / 120
@@ -60,12 +62,12 @@ def score(text):
 def pick_top(news):
     return sorted(news, key=lambda x: score(x["title"] + x["desc"]), reverse=True)[:10]
 
-# ================= AI CONTENT =================
+# ================= AI =================
 def ai_generate(title, desc):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
 
     prompt = f"""
-Create viral Facebook caption + cinematic image prompt.
+Create viral Facebook caption + image prompt.
 
 News:
 {title}
@@ -74,7 +76,7 @@ News:
 Return ONLY JSON:
 {{
  "caption": "...",
- "image_prompt": "dark cinematic dramatic lighting news style"
+ "image_prompt": "dark cinematic news style"
 }}
 """
 
@@ -93,11 +95,11 @@ Return ONLY JSON:
             "image_prompt": "dark cinematic news scene"
         }
 
-# ================= IMAGE GENERATOR =================
+# ================= IMAGE =================
 def generate_image(prompt):
     return f"https://image.pollinations.ai/p/{urllib.parse.quote(prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
 
-# ================= DISCORD LOG =================
+# ================= LOG =================
 def log(msg):
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
@@ -126,11 +128,11 @@ def comment(post_id):
             return
 
         replies = [
-            "🔥 Interesting",
-            "What do you think?",
-            "Crazy 👀",
-            "This is trending",
-            "Wow"
+            "Thanks for sharing your thoughts! 🙌",
+            "That's an interesting point.",
+            "We appreciate your comment ❤️",
+            "Thanks for joining the discussion!",
+            "Glad to hear your opinion."
         ]
 
         for c in r["data"][:2]:
@@ -149,12 +151,31 @@ def comment(post_id):
     except:
         pass
 
+# ================= COMMENT LOOP =================
+def comment_loop():
+    global latest_post_id
+
+    while True:
+        if latest_post_id:
+            try:
+                comment(latest_post_id)
+            except Exception as e:
+                log(f"Comment Error: {e}")
+
+        time.sleep(900)
+
 # ================= SLOTS =================
 def slots():
-    return [0, 60, 120, 180, 240, 300, 360, 420, 480, 540]
+    return [
+        0, 2 * 3600, 4 * 3600, 6 * 3600,
+        8 * 3600, 10 * 3600, 12 * 3600,
+        14 * 3600, 16 * 3600, 17 * 3600,
+    ]
 
 # ================= MAIN BOT =================
 def run_bot():
+    global latest_post_id
+
     running = False
 
     while True:
@@ -183,9 +204,8 @@ def run_bot():
                     res = post_fb(content["caption"], img)
 
                     if "id" in res:
-                        pid = res["id"]
+                        latest_post_id = res["id"]
                         log(f"✅ Posted: {content['caption']}")
-                        comment(pid)
                     else:
                         log(f"❌ Failed: {res}")
 
@@ -202,4 +222,5 @@ def run_bot():
 # ================= START =================
 if __name__ == "__main__":
     Thread(target=run_server, daemon=True).start()
+    Thread(target=comment_loop, daemon=True).start()
     run_bot()
