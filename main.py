@@ -11,7 +11,7 @@ from threading import Thread
 
 # ================= CONFIG (YOUR DATA) =================
 FB_PAGE_ID = "1243828092139012"
-FB_ACCESS_TOKEN = "EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT"
+FB_ACCESS_TOKEN = "EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT"
 
 GEMINI_API_KEY = "AQ.Ab8RN6KbzrhhZ0gfAfBDFeWzsUuECcEcVAu7JkRFW6-sVh9CoQ"
 
@@ -55,7 +55,7 @@ def get_news():
 # ================= VIRAL SCORE =================
 def score(text):
     keys = ["war", "breaking", "crisis", "trump", "china", "nasa", "shock", "explosion"]
-    return sum(2 for k in keys if k in text.lower()) + len(text)/120
+    return sum(2 for k in keys if k in text.lower()) + len(text) / 120
 
 def pick_top(news):
     return sorted(news, key=lambda x: score(x["title"] + x["desc"]), reverse=True)[:10]
@@ -79,7 +79,7 @@ Return ONLY JSON:
 """
 
     try:
-        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+        r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
         text = r.json()['candidates'][0]['content']['parts'][0]['text']
 
         if "```json" in text:
@@ -100,20 +100,20 @@ def generate_image(prompt):
 # ================= DISCORD =================
 def log(title, msg):
     try:
-        requests.post(https://discord.com/api/webhooks/1521532656825929911/r_p09BIeETgtrGdk3QsdHb5WglQNSqwKrHTWpCtvmA7n-HyTGKhQWZOz65Zpf0OE58iu, json={
-            "embeds":[{"title":title,"description":msg[:3000],"color":3447003}]
+        requests.post(DISCORD_WEBHOOK_URL, json={
+            "embeds": [{"title": title, "description": msg[:3000], "color": 3447003}]
         })
     except:
         pass
 
 # ================= FACEBOOK =================
 def post_fb(caption, image_url):
-    url = f"https://graph.facebook.com/v20.0/{1243828092139012}/photos"
+    url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
 
     return requests.post(url, data={
         "caption": caption,
         "url": image_url,
-        "access_token": EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT
+        "access_token": FB_ACCESS_TOKEN
     }).json()
 
 # ================= COMMENT BOT =================
@@ -121,7 +121,7 @@ def comment(post_id):
     try:
         r = requests.get(
             f"https://graph.facebook.com/v20.0/{post_id}/comments",
-            params={"access_token": EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT}
+            params={"access_token": FB_ACCESS_TOKEN}
         ).json()
 
         if "data" not in r:
@@ -142,7 +142,7 @@ def comment(post_id):
                 f"https://graph.facebook.com/v20.0/{cid}/comments",
                 data={
                     "message": random.choice(replies),
-                    "access_token": EAF40ZBiCgXTQBR6CeFVpHaubM4U9stvPlvBhKFsH57MMT3py3dq8d4Xs9uttevBqwvy99cuvBL4tpmUnxCrjcf14cg4qtSsKJj8bZCizbdhF8sLlWZABkIcZC9Qk6hB6FeduLjNnBhgTlaHi99L09sNGEcIQ8wywZAqNSZAx6bI1xqKvNqUrvYRVAx9d7F0lXBfjg8PmaT
+                    "access_token": FB_ACCESS_TOKEN
                 }
             )
 
