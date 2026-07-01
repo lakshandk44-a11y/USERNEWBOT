@@ -40,7 +40,7 @@ def now():
 
 def is_start_time():
     t = now()
-    return t.hour == 9 and t.minute == 03
+    return t.hour == 9 and t.minute == 04
 
 def reset_time():
     t = now()
