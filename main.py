@@ -42,7 +42,7 @@ TIME_SLOTS = [
     (6, 0),
     (8, 0),
     (10, 0),
-    (12, 0),
+    (12, 23),
     (14, 0),
     (16, 0),
     (18, 0),
@@ -59,7 +59,9 @@ def log(msg):
     print(msg)
     try:
         if DISCORD_WEBHOOK_URL:
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+            requests.post(DISCORD_WEBHOOK_URL, json={
+                "content": f"🤖 BOT UPDATE:\n{msg}"
+            })
     except:
         pass
 
@@ -82,18 +84,20 @@ def get_news():
         log(f"News error: {e}")
         return []
 
-# ================= SAFE GEMINI =================
+# ================= SAFE GEMINI (FIXED + RETRY) =================
 def ai_generate(title, desc):
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    for attempt in range(2):  # 🔥 retry once
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-        prompt = f"""
+            prompt = f"""
 Create viral Facebook news caption + image prompt.
 
-Style:
-- dark cinematic realistic
+IMPORTANT:
+- Add engaging caption
+- Add 3-6 hashtags at the end
+- Style: dark cinematic realistic news tone
 - NOT cartoon
-- emotional but professional
 
 News:
 {title}
@@ -106,43 +110,51 @@ Return ONLY JSON:
 }}
 """
 
-        r = requests.post(url, json={
-            "contents": [{"parts": [{"text": prompt}]}]
-        }, timeout=30)
+            r = requests.post(url, json={
+                "contents": [{"parts": [{"text": prompt}]}]
+            }, timeout=30)
 
-        data = r.json()
+            data = r.json()
 
-        # SAFE FIX (prevents crash)
-        if "candidates" not in data:
-            log(f"AI FAIL: {data}")
-            return fallback(title)
+            if "candidates" not in data:
+                log(f"AI FAIL: {data}")
+                time.sleep(1)
+                continue
 
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
 
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
 
-        return json.loads(text.strip())
+            result = json.loads(text.strip())
 
-    except Exception as e:
-        log(f"AI ERROR: {e}")
-        return fallback(title)
+            # FORCE hashtags if missing
+            if "#" not in result["caption"]:
+                result["caption"] += "\n\n#BreakingNews #WorldNews #Update #Trending"
 
-# ================= FALLBACK =================
+            return result
+
+        except Exception as e:
+            log(f"AI ERROR (attempt {attempt+1}): {e}")
+            time.sleep(1)
+
+    return fallback(title)
+
+# ================= FALLBACK (IMPROVED) =================
 def fallback(title):
     return {
-        "caption": f"🔥 Breaking News: {title}",
-        "image_prompt": "dark cinematic news photography, dramatic lighting, realistic, ultra detailed"
+        "caption": f"🚨 Breaking Update: {title}\n\n#BreakingNews #WorldNews #Update #Trending",
+        "image_prompt": "dark cinematic realistic news photography, dramatic lighting, ultra detailed, editorial style"
     }
 
 # ================= IMAGE GENERATION =================
 def generate_image(prompt):
     safe = urllib.parse.quote(
-        prompt + ", dark cinematic, realistic photography, news style, 4k ultra detailed"
+        prompt + ", cinematic, realistic, dramatic lighting, news editorial style, ultra detailed, 4k"
     )
     return f"https://image.pollinations.ai/prompt/{safe}"
 
-# ================= FACEBOOK POST (REAL IMAGE) =================
+# ================= FACEBOOK POST =================
 def post_fb(caption, image_url):
     try:
         url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
