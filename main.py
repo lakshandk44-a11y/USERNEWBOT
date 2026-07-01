@@ -19,8 +19,6 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 # ================= GLOBAL =================
 post_queue = []
 seen_titles = set()
-
-# track replied comments
 replied_comments = set()
 
 # ================= FLASK =================
@@ -84,7 +82,7 @@ def get_news():
         log(f"News error: {e}")
         return []
 
-# ================= AI =================
+# ================= AI CAPTION =================
 def ai_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
@@ -99,7 +97,7 @@ News:
 Return ONLY JSON:
 {{
  "caption": "...",
- "image_prompt": "cinematic dramatic news style"
+ "image_prompt": "..."
 }}
 """
 
@@ -114,12 +112,21 @@ Return ONLY JSON:
     except:
         return {
             "caption": f"🔥 Breaking: {title}",
-            "image_prompt": "dark cinematic news"
+            "image_prompt": "news scene"
         }
 
-# ================= IMAGE =================
+# ================= 🎨 IMPROVED IMAGE GENERATOR =================
 def generate_image(prompt):
-    return f"https://image.pollinations.ai/p/{urllib.parse.quote(prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
+    enhanced_prompt = f"""
+ultra cinematic news illustration, high quality AI artwork,
+dramatic lighting, depth of field, emotional storytelling,
+slightly stylized realistic digital art (not cartoon),
+4k ultra detail, magazine cover quality, modern news visualization,
+
+Scene: {prompt}
+"""
+
+    return f"https://image.pollinations.ai/p/{urllib.parse.quote(enhanced_prompt)}?width=1080&height=1080&nologo=true&seed={random.randint(1,999999)}"
 
 # ================= FACEBOOK POST =================
 def post_fb(caption, image_url):
@@ -153,7 +160,7 @@ def build_queue():
         if is_safe(n["title"] + n["desc"]):
             post_queue.append(n)
 
-# ================= WORKER (POST ENGINE) =================
+# ================= WORKER =================
 def worker():
     global post_queue
 
@@ -178,13 +185,12 @@ def worker():
             log(f"Worker error: {e}")
             time.sleep(5)
 
-# ================= COMMENT BOT (REAL ENGAGEMENT) =================
+# ================= COMMENT BOT =================
 def comment_loop():
     global replied_comments
 
     while True:
         try:
-            # 1. get latest page posts
             posts = requests.get(
                 f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/posts",
                 params={"access_token": FB_ACCESS_TOKEN}
@@ -195,10 +201,8 @@ def comment_loop():
                 continue
 
             for post in posts["data"][:5]:
-
                 post_id = post["id"]
 
-                # 2. get comments
                 comments = requests.get(
                     f"https://graph.facebook.com/v20.0/{post_id}/comments",
                     params={"access_token": FB_ACCESS_TOKEN}
@@ -208,25 +212,23 @@ def comment_loop():
                     continue
 
                 for c in comments["data"]:
+                    cid = c["id"]
 
-                    comment_id = c["id"]
-
-                    # avoid duplicate replies
-                    if comment_id in replied_comments:
+                    if cid in replied_comments:
                         continue
 
-                    replied_comments.add(comment_id)
+                    replied_comments.add(cid)
 
                     reply = random.choice([
-                        "Thanks for your comment 🙌",
-                        "Appreciate your thoughts 👍",
-                        "Interesting point 🔥",
-                        "Good opinion ❤️",
-                        "Thanks for engaging!"
+                        "Thanks 🙌",
+                        "Interesting!",
+                        "Good point 👍",
+                        "Nice view ❤️",
+                        "Appreciate it!"
                     ])
 
                     requests.post(
-                        f"https://graph.facebook.com/v20.0/{comment_id}/comments",
+                        f"https://graph.facebook.com/v20.0/{cid}/comments",
                         data={
                             "message": reply,
                             "access_token": FB_ACCESS_TOKEN
