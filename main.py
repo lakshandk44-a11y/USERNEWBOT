@@ -18,8 +18,10 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # ================= GLOBAL =================
 post_queue = []
+scheduled_posts = []
 seen_titles = set()
 replied_comments = set()
+posted_today = 0
 
 # ================= FLASK =================
 app = Flask(__name__)
@@ -38,13 +40,23 @@ tz = pytz.timezone("America/New_York")
 def now():
     return datetime.now(tz)
 
-def is_start_time():
-    t = now()
-    return t.hour == 9 and t.minute == 04
-
 def reset_time():
     t = now()
     return t.hour == 0 and t.minute < 5
+
+# ================= 10 BEST TIME SLOTS =================
+TIME_SLOTS = [
+    (9, 18),
+    (8, 0),
+    (10, 0),
+    (12, 0),
+    (14, 0),
+    (16, 0),
+    (18, 0),
+    (20, 0),
+    (22, 0),
+    (23, 30),
+]
 
 # ================= LOG =================
 def log(msg):
@@ -63,8 +75,7 @@ def get_news():
         )
 
         items = []
-
-        for e in feed.entries[:20]:
+        for e in feed.entries[:30]:
             title = getattr(e, "title", "No Title")
 
             if title in seen_titles:
@@ -102,9 +113,7 @@ Return ONLY JSON:
 }}
 """
 
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
         r = requests.post(url, json=payload, timeout=30)
         data = r.json()
@@ -123,17 +132,14 @@ Return ONLY JSON:
             "image_prompt": "news illustration"
         }
 
-# ================= IMAGE (SAFE FIX) =================
+# ================= IMAGE =================
 def generate_image(prompt):
-    # Facebook-safe approach: stable public image generator
     safe = urllib.parse.quote(prompt[:120])
-
     return f"https://dummyimage.com/1080x1080/000/fff.png&text={safe}"
 
-# ================= FACEBOOK POST FIXED =================
+# ================= FACEBOOK POST =================
 def post_fb(caption, image_url):
     try:
-        # FIX: use feed instead of /photos (avoids image validation error)
         url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed"
 
         res = requests.post(url, data={
@@ -154,37 +160,65 @@ def is_safe(text):
     bad_words = ["death", "kill", "terror", "rape"]
     return not any(b in text.lower() for b in bad_words)
 
-# ================= QUEUE =================
-def build_queue():
+# ================= BUILD 10 POSTS =================
+def build_daily_posts():
+    global scheduled_posts, posted_today
+
+    scheduled_posts = []
+    posted_today = 0
+
     news = get_news()
+
     for n in news:
+        if len(scheduled_posts) >= 10:
+            break
+
         if is_safe(n["title"] + n["desc"]):
-            post_queue.append(n)
+            ai = ai_generate(n["title"], n["desc"])
+            img = generate_image(ai["image_prompt"])
+
+            scheduled_posts.append({
+                "caption": ai["caption"],
+                "image": img,
+                "posted": False
+            })
+
+    log(f"Prepared {len(scheduled_posts)} posts for today")
+
+# ================= POST SCHEDULER =================
+def should_post_now(slot_index):
+    t = now()
+    h, m = TIME_SLOTS[slot_index]
+    return t.hour == h and t.minute == m
 
 # ================= WORKER =================
-def worker():
+def scheduler():
+    global posted_today
+
     while True:
         try:
-            if not post_queue:
-                time.sleep(10)
-                continue
+            # reset daily
+            if reset_time():
+                build_daily_posts()
 
-            item = post_queue.pop(0)
+            # post only 10 times per day
+            if posted_today < 10 and posted_today < len(scheduled_posts):
 
-            content = ai_generate(item["title"], item["desc"])
-            img = generate_image(content["image_prompt"])
+                if should_post_now(posted_today):
+                    item = scheduled_posts[posted_today]
 
-            res = post_fb(content["caption"], img)
+                    res = post_fb(item["caption"], item["image"])
 
-            if "id" in res:
-                log(f"POST SUCCESS: {res['id']}")
-            else:
-                log(f"POST FAILED: {res}")
+                    if "id" in res:
+                        log(f"POSTED {posted_today+1}/10")
+                        posted_today += 1
+                    else:
+                        log(f"POST FAILED: {res}")
 
-            time.sleep(random.randint(3600, 7200))
+            time.sleep(20)
 
         except Exception as e:
-            log(f"Worker error: {e}")
+            log(f"Scheduler error: {e}")
             time.sleep(5)
 
 # ================= COMMENT BOT =================
@@ -242,28 +276,10 @@ def comment_loop():
 
         time.sleep(60)
 
-# ================= SCHEDULER =================
-def scheduler():
-    running = False
-
-    while True:
-        try:
-            if reset_time():
-                running = False
-
-            if is_start_time() and not running:
-                running = True
-                log("New York Cycle Started")
-                build_queue()
-
-        except Exception as e:
-            log(f"Scheduler error: {e}")
-
-        time.sleep(30)
-
 # ================= START =================
 if __name__ == "__main__":
+    build_daily_posts()
+
     Thread(target=run_server, daemon=True).start()
     Thread(target=comment_loop, daemon=True).start()
-    Thread(target=worker, daemon=True).start()
     scheduler()
