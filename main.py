@@ -83,9 +83,9 @@ SCENIC_PLACES = [
     "Chicago skyline reflections on river"
 ]
 
-# ================= CARTOON NEWS SLOTS (NEW) =================
+# ================= CARTOON NEWS SLOTS =================
 CARTOON_SLOTS = [
-    (22, 52),
+    (23, 0),
     (10, 30),
     (13, 30),
     (16, 30),
@@ -169,32 +169,34 @@ News:
         except:
             time.sleep(1)
 
-    return fallback(title)
-
-def fallback(title):
     return {
         "caption": f"🚨 Breaking Update: {title}\n\n#BreakingNews #WorldNews",
-        "image_prompt": "dark cinematic news photography, ultra realistic"
+        "image_prompt": "dark cinematic news photography"
     }
 
-# ================= CARTOON NEWS AI (NEW) =================
+# ================= CARTOON NEWS AI (FIXED STYLE) =================
 def cartoon_generate():
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         prompt = """
-Convert real-world news into SIMPLE CARTOON STYLE explanation.
+Convert news into HAND DRAWN NEWSPAPER STYLE CARTOON.
+
+STYLE REQUIREMENTS:
+- black and white sketch or simple hand drawn cartoon
+- exaggerated characters (big heads, expressive faces)
+- like political newspaper cartoons
+- include speech bubbles in image concept
+- simple background, minimal detail
+- easy to understand visual storytelling
 
 Return JSON:
 {
- "caption": "...simple easy english...",
- "image_prompt": "cartoon style illustration, simple shapes, colorful, educational"
+ "caption": "...simple clear explanation...",
+ "image_prompt": "hand drawn editorial cartoon, newspaper style sketch, caricature, big head characters, speech bubbles, black and white ink drawing"
 }
 
-Make it:
-- easy to understand
-- cartoon style
-- safe and non-violent presentation
+Make it simple, funny, and easy to understand.
 """
 
         r = requests.post(url, json={
@@ -212,8 +214,8 @@ Make it:
 
     except:
         return {
-            "caption": "🧠 Cartoon News Update\nSimple explanation of today's events.",
-            "image_prompt": "cartoon news illustration, simple, colorful"
+            "caption": "📰 Cartoon News Update",
+            "image_prompt": "hand drawn newspaper cartoon, simple sketch style"
         }
 
 # ================= SCENIC AI =================
@@ -222,7 +224,7 @@ def scenic_generate():
 
     return {
         "caption": f"✨ Discover {place}\n\n#Travel #Nature #Photography",
-        "image_prompt": f"Ultra realistic cinematic photo of {place}, golden hour, 8k"
+        "image_prompt": f"Ultra realistic cinematic photo of {place}"
     }
 
 # ================= IMAGE =================
@@ -301,6 +303,34 @@ def comment_bot():
 
         time.sleep(60)
 
+# ================= CARTOON SCHEDULER =================
+def cartoon_scheduler():
+    global posted_cartoon_slots
+
+    while True:
+        try:
+            for i in range(len(CARTOON_SLOTS)):
+                if i in posted_cartoon_slots:
+                    continue
+
+                h, m = CARTOON_SLOTS[i]
+                if now().hour == h and now().minute == m:
+
+                    data = cartoon_generate()
+                    img = generate_image(data["image_prompt"])
+
+                    res = post_fb(data["caption"], img)
+
+                    if "id" in res:
+                        posted_cartoon_slots.add(i)
+                        log(f"CARTOON SLOT {i+1}")
+
+            time.sleep(20)
+
+        except Exception as e:
+            log(f"CARTOON ERROR: {e}")
+            time.sleep(5)
+
 # ================= MAIN SCHEDULER =================
 def scheduler():
     global posted_slots, posted_scenic_slots
@@ -357,37 +387,9 @@ def scheduler():
             log(f"SCHEDULER ERROR: {e}")
             time.sleep(5)
 
-# ================= CARTOON SCHEDULER (NEW THREAD) =================
-def cartoon_scheduler():
-    global posted_cartoon_slots
-
-    while True:
-        try:
-            for i in range(len(CARTOON_SLOTS)):
-                if i in posted_cartoon_slots:
-                    continue
-
-                h, m = CARTOON_SLOTS[i]
-                if now().hour == h and now().minute == m:
-
-                    data = cartoon_generate()
-                    img = generate_image(data["image_prompt"])
-
-                    res = post_fb(data["caption"], img)
-
-                    if "id" in res:
-                        posted_cartoon_slots.add(i)
-                        log(f"CARTOON SLOT {i+1}")
-
-            time.sleep(20)
-
-        except Exception as e:
-            log(f"CARTOON ERROR: {e}")
-            time.sleep(5)
-
 # ================= START =================
 if __name__ == "__main__":
     Thread(target=run_server, daemon=True).start()
     Thread(target=comment_bot, daemon=True).start()
-    Thread(target=cartoon_scheduler, daemon=True).start()  # NEW ADD
+    Thread(target=cartoon_scheduler, daemon=True).start()
     scheduler()
