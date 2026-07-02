@@ -55,7 +55,7 @@ def reset_time():
 # ================= TIME SLOTS =================
 TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
 SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
-CARTOON_SLOTS = [(7,50),(10,30),(13,30),(16,30),(19,30)]
+CARTOON_SLOTS = [(7,15),(12,15),(13,30),(16,30),(19,30)]
 
 posted_slots = set()
 posted_scenic_slots = set()
@@ -100,25 +100,6 @@ def apply_monetization(text):
     return text
 
 
-# ================= 🔥 VIRAL CAPTION UPGRADE (ONLY ADDITION) =================
-def make_viral_caption(text):
-    hooks = [
-        "🚨 BREAKING:",
-        "😱 SHOCKING:",
-        "⚠️ ALERT:",
-        "🔥 JUST IN:",
-        "💥 VIRAL UPDATE:"
-    ]
-    suffix = [
-        "People are reacting strongly!",
-        "This is going viral right now!",
-        "You won't believe this!",
-        "Social media is exploding!",
-        "What do you think?"
-    ]
-    return f"{random.choice(hooks)} {text}\n\n{random.choice(suffix)}"
-
-
 # ================= NEWS =================
 def get_news():
     try:
@@ -153,9 +134,7 @@ Return:
 
         result = json.loads(text)
 
-        # 🔥 VIRAL CAPTION APPLIED
-        caption = make_viral_caption(result["caption"])
-        result["caption"] = apply_monetization(caption)
+        result["caption"] = apply_monetization(make_viral_caption(result["caption"]))
 
         return result
 
@@ -165,33 +144,82 @@ Return:
             "image_prompt": "news illustration"
         }
 
-# ================= CARTOON AI =================
+# ================= 🔥 VIRAL CAPTION SYSTEM =================
+def make_viral_caption(text):
+    hooks = ["🚨 BREAKING:", "😱 SHOCKING:", "🔥 JUST IN:", "⚠️ ALERT:"]
+    suffix = [
+        "People are reacting strongly!",
+        "This is going viral right now!",
+        "You won't believe this!",
+        "What is your opinion?"
+    ]
+    return f"{random.choice(hooks)} {text}\n\n{random.choice(suffix)}"
+
+
+# ================= CARTOON AI (IMF-STYLE FULL UPGRADE ONLY HERE) =================
 def cartoon_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         text = (title + " " + desc).lower()
 
-        if any(k in text for k in ["war","attack","military","bomb"]):
-            character = "terrified soldier screaming in chaos"
-        elif any(k in text for k in ["money","bank","stock","economy","crash"]):
-            character = "panic-stricken businessman at collapsing stock market screen"
-        elif any(k in text for k in ["president","government","politics"]):
-            character = "shocked politician sweating under press lights"
+        # ================= CATEGORY DETECTION =================
+        if any(k in text for k in ["war","attack","military","bomb","conflict"]):
+            category = "war"
+            metaphor = "two forces struggling over a nation-shaped object"
+            characters = "soldiers in opposing sides"
+            background = "battlefield chaos with smoke"
+        elif any(k in text for k in ["money","bank","stock","economy","loan","imf","debt"]):
+            category = "finance"
+            metaphor = "financial institutions squeezing a country shaped figure"
+            characters = "IMF suited figure and local representative"
+            background = "global finance charts and money flow"
+        elif any(k in text for k in ["politics","government","president","election"]):
+            category = "politics"
+            metaphor = "political leaders controlling a puppet nation"
+            characters = "politicians in suits with labels"
+            background = "parliament or press room"
         elif any(k in text for k in ["sports","cricket","football"]):
-            character = "exhausted athlete collapsing after dramatic moment"
+            category = "sports"
+            metaphor = "teams fighting for a trophy shaped symbol"
+            characters = "athletes in action"
+            background = "stadium crowd"
         else:
-            character = "horrified news reporter in breaking news studio"
+            category = "general"
+            metaphor = "media influencing public perception"
+            characters = "news reporter and crowd"
+            background = "breaking news studio"
 
+        # ================= IMF STYLE PROMPT =================
         prompt = f"""
-Create grotesque editorial cartoon style news illustration.
+A detailed editorial cartoon, stylistically identical to structured political cartoons.
 
 NEWS:
 {title}
 {desc}
 
-Character:
-{character}
+CATEGORY:
+{category}
+
+CHARACTERS:
+{characters}
+
+MAIN METAPHOR:
+{metaphor}
+
+BACKGROUND:
+{background}
+
+VISUAL RULES:
+- Editorial cartoon style
+- Symbolic storytelling instead of literal scene
+- Bold ink outlines
+- Flat color palette
+- Strong emotional exaggeration
+- Newspaper political illustration style
+
+IMPORTANT:
+Convert news into symbolic cartoon composition like IMF-style editorial metaphor illustrations.
 
 Return JSON:
 {{"caption":"viral caption","image_prompt":"detailed prompt"}}
@@ -205,16 +233,27 @@ Return JSON:
 
         result = json.loads(text)
 
-        # 🔥 VIRAL CAPTION APPLIED
         caption = make_viral_caption(result["caption"])
-        result["caption"] = apply_monetization(caption)
+        caption = apply_monetization(caption)
+
+        tags = {
+            "war": "#War #BreakingNews #World",
+            "finance": "#Economy #IMF #Finance #Breaking",
+            "politics": "#Politics #News #Breaking",
+            "sports": "#Sports #Live",
+            "general": "#News #Viral"
+        }
+
+        caption += "\n\n" + tags.get(category, "#News")
+
+        result["caption"] = caption
 
         return result
 
     except:
         return {
-            "caption": apply_monetization(make_viral_caption("Cartoon News")),
-            "image_prompt": "editorial cartoon breaking news illustration"
+            "caption": apply_monetization(make_viral_caption("Breaking News")) + "\n\n#News",
+            "image_prompt": "editorial cartoon illustration"
         }
 
 # ================= IMAGE =================
@@ -230,7 +269,7 @@ def post_fb(caption, image_url):
         "access_token": FB_ACCESS_TOKEN
     }).json()
 
-# ================= SCHEDULER (UNCHANGED) =================
+# ================= SCHEDULER =================
 def scheduler():
     global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
 
