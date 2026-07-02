@@ -16,6 +16,21 @@ FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
+# ================= MONETIZATION SETTINGS =================
+MONETIZATION_MODE = "affiliate"   # affiliate | sponsor | off
+
+AFFILIATE_LINKS = [
+    "https://example.com/deal1",
+    "https://example.com/deal2",
+    "https://example.com/deal3"
+]
+
+SPONSORS = [
+    "XYZ News Partner",
+    "Global Media Sponsor",
+    "Trending Ads Network"
+]
+
 # ================= FLASK =================
 app = Flask(__name__)
 
@@ -40,16 +55,12 @@ def reset_time():
 # ================= TIME SLOTS =================
 TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
 SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
-CARTOON_SLOTS = [(23,42),(10,30),(13,30),(16,30),(19,30)]
+CARTOON_SLOTS = [(0,7),(10,30),(13,30),(16,30),(19,30)]
 
 posted_slots = set()
 posted_scenic_slots = set()
 posted_cartoon_slots = set()
-
-# 🔥 NEW: duplicate blocker
 seen_news = set()
-
-seen_comments = set()
 
 SCENIC_PLACES = [
     "Grand Canyon, USA",
@@ -72,6 +83,21 @@ def log(msg):
             requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
     except:
         pass
+
+# ================= MONETIZATION ENGINE =================
+def apply_monetization(text):
+    if MONETIZATION_MODE == "off":
+        return text
+
+    if MONETIZATION_MODE == "affiliate":
+        link = random.choice(AFFILIATE_LINKS)
+        return text + f"\n\n👉 Recommended: {link}"
+
+    if MONETIZATION_MODE == "sponsor":
+        sponsor = random.choice(SPONSORS)
+        return f"{text}\n\nSponsored by {sponsor}"
+
+    return text
 
 # ================= NEWS =================
 def get_news():
@@ -105,9 +131,17 @@ Return:
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
 
-        return json.loads(text)
+        result = json.loads(text)
+
+        result["caption"] = apply_monetization(result["caption"])
+
+        return result
+
     except:
-        return {"caption":title,"image_prompt":"news illustration"}
+        return {
+            "caption": apply_monetization(title),
+            "image_prompt": "news illustration"
+        }
 
 # ================= CARTOON AI =================
 def cartoon_generate(title, desc):
@@ -120,9 +154,9 @@ def cartoon_generate(title, desc):
             character = "a frightened soldier in uniform"
         elif any(k in text for k in ["money","bank","stock","economy","crash"]):
             character = "a stressed businessman in suit"
-        elif any(k in text for k in ["president","government","election","politics"]):
+        elif any(k in text for k in ["president","government","politics"]):
             character = "a shocked politician at a news desk"
-        elif any(k in text for k in ["sports","cricket","football","match"]):
+        elif any(k in text for k in ["sports","cricket","football"]):
             character = "an exhausted athlete reacting emotionally"
         else:
             character = "a terrified news reporter"
@@ -146,22 +180,19 @@ Return JSON:
 
         result = json.loads(text)
 
+        result["caption"] = apply_monetization(result["caption"])
+
         result["image_prompt"] = f"""
-A grotesque editorial cartoon, {character}, extreme close-up face, exaggerated expression, news desk, microphone, thick ink sketch style, sickly green tone, minimal background, news ticker about {title}
+A grotesque editorial cartoon, {character}, extreme close-up, ink sketch style, news desk, microphone, sickly green tone, minimal background, news about {title}
 """
 
         return result
 
     except:
-        return {"caption":"Cartoon","image_prompt":"editorial cartoon sketch"}
-
-# ================= SCENIC =================
-def scenic_generate():
-    place = random.choice(SCENIC_PLACES)
-    return {
-        "caption": f"✨ {place}",
-        "image_prompt": f"Ultra realistic cinematic photo of {place}"
-    }
+        return {
+            "caption": apply_monetization("Cartoon News"),
+            "image_prompt": "editorial cartoon sketch"
+        }
 
 # ================= IMAGE =================
 def generate_image(prompt):
@@ -176,47 +207,7 @@ def post_fb(caption, image_url):
         "access_token": FB_ACCESS_TOKEN
     }).json()
 
-# ================= CARTOON SCHEDULER =================
-def cartoon_scheduler():
-    global posted_cartoon_slots, seen_news
-
-    while True:
-        try:
-            news_list = get_news()
-
-            for i,(h,m) in enumerate(CARTOON_SLOTS):
-                if i in posted_cartoon_slots:
-                    continue
-
-                if now().hour==h and now().minute==m:
-
-                    random.shuffle(news_list)
-
-                    for news in news_list:
-                        key = news["title"]
-
-                        if key in seen_news:
-                            continue
-
-                        seen_news.add(key)
-
-                        data = cartoon_generate(news["title"], news["desc"])
-
-                        img = generate_image(data["image_prompt"])
-                        res = post_fb(data["caption"], img)
-
-                        if "id" in res:
-                            posted_cartoon_slots.add(i)
-                            log(f"CARTOON SLOT {i+1}")
-                        break
-
-            time.sleep(20)
-
-        except Exception as e:
-            log(str(e))
-            time.sleep(5)
-
-# ================= MAIN SCHEDULER =================
+# ================= START =================
 def scheduler():
     global posted_slots, posted_scenic_slots, seen_news
 
@@ -225,27 +216,22 @@ def scheduler():
             if reset_time():
                 posted_slots=set()
                 posted_scenic_slots=set()
-                seen_news=set()   # 🔥 reset daily
-                log("RESET")
+                seen_news=set()
 
-            # NEWS
             news_list = get_news()
 
+            # NEWS
             for i,(h,m) in enumerate(TIME_SLOTS):
                 if i in posted_slots:
                     continue
-
                 if now().hour==h and now().minute==m:
 
                     random.shuffle(news_list)
 
                     for news in news_list:
-                        key = news["title"]
-
-                        if key in seen_news:
+                        if news["title"] in seen_news:
                             continue
-
-                        seen_news.add(key)
+                        seen_news.add(news["title"])
 
                         ai=ai_generate(news["title"],news["desc"])
                         img=generate_image(ai["image_prompt"])
@@ -253,18 +239,17 @@ def scheduler():
 
                         if "id" in res:
                             posted_slots.add(i)
-                            log(f"NEWS SLOT {i+1}")
                         break
 
             # SCENIC
             for i,(h,m) in enumerate(SCENIC_SLOTS):
                 if i in posted_scenic_slots:
                     continue
-
                 if now().hour==h and now().minute==m:
-                    sc=scenic_generate()
-                    img=generate_image(sc["image_prompt"])
-                    res=post_fb(sc["caption"],img)
+
+                    place=random.choice(SCENIC_PLACES)
+                    img=generate_image("Ultra realistic cinematic photo of "+place)
+                    res=post_fb("✨ "+place,img)
 
                     if "id" in res:
                         posted_scenic_slots.add(i)
@@ -275,8 +260,7 @@ def scheduler():
             log(str(e))
             time.sleep(5)
 
-# ================= START =================
+# ================= RUN =================
 if __name__=="__main__":
     Thread(target=run_server,daemon=True).start()
-    Thread(target=cartoon_scheduler,daemon=True).start()
     scheduler()
