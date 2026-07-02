@@ -55,7 +55,7 @@ def reset_time():
 # ================= TIME SLOTS =================
 TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
 SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
-CARTOON_SLOTS = [(9,5),(10,30),(13,30),(16,30),(19,30)]
+CARTOON_SLOTS = [(9,45),(10,30),(13,30),(16,30),(19,30)]
 
 posted_slots = set()
 posted_scenic_slots = set()
@@ -183,7 +183,7 @@ Return JSON:
         result["caption"] = apply_monetization(result["caption"])
 
         result["image_prompt"] = f"""
-A grotesque editorial cartoon, {character}, extreme close-up, ink sketch style, news desk, microphone, sickly green tone, minimal background, news about {title}
+A grotesque editorial cartoon, {character}, extreme close-up, ink sketch style, news desk, microphone, news about {title}
 """
 
         return result
@@ -207,82 +207,27 @@ def post_fb(caption, image_url):
         "access_token": FB_ACCESS_TOKEN
     }).json()
 
-# ================= CARTOON SCHEDULER =================
-def cartoon_scheduler():
-    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
-    while True:
-        try:
-            news_list = get_news()
-
-            for i, (h, m) in enumerate(CARTOON_SLOTS):
-
-                if i in posted_cartoon_slots:
-                    continue
-
-                if now().hour == h and now().minute == m:
-
-                    random.shuffle(news_list)
-
-                    for news in news_list:
-
-                        if news["title"] in seen_news:
-                            continue
-
-                        seen_news.add(news["title"])
-
-                        data = cartoon_generate(
-                            news["title"],
-                            news["desc"]
-                        )
-
-                        img = generate_image(
-                            data["image_prompt"]
-                        )
-
-                        res = post_fb(
-                            data["caption"],
-                            img
-                        )
-
-                        if "id" in res:
-                            posted_cartoon_slots.add(i)
-                            log(f"CARTOON SLOT {i+1}")
-
-                        break
-
-            time.sleep(20)
-
-        except Exception as e:
-            log(f"CARTOON ERROR: {e}")
-            time.sleep(5)
-
 # ================= START =================
 def scheduler():
     global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
 
     while True:
         try:
-            
-# ================= START =================
-def scheduler():
-    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
-
-    while True:
-        try:
-
             if reset_time():
-                posted_slots = set()
-                posted_scenic_slots = set()
-                posted_cartoon_slots = set()
-                seen_news = set()
+                posted_slots=set()
+                posted_scenic_slots=set()
+                posted_cartoon_slots=set()
+                seen_news=set()
 
             news_list = get_news()
 
-            # NEWS
+            # ================= NEWS =================
             for i,(h,m) in enumerate(TIME_SLOTS):
                 if i in posted_slots:
                     continue
-                if now().hour==h and now().minute==m:
+
+                t = now()
+                if t.hour == h and abs(t.minute - m) <= 1:
 
                     random.shuffle(news_list)
 
@@ -291,26 +236,52 @@ def scheduler():
                             continue
                         seen_news.add(news["title"])
 
-                        ai=ai_generate(news["title"],news["desc"])
-                        img=generate_image(ai["image_prompt"])
-                        res=post_fb(ai["caption"],img)
+                        ai = ai_generate(news["title"], news["desc"])
+                        img = generate_image(ai["image_prompt"])
+                        res = post_fb(ai["caption"], img)
 
                         if "id" in res:
                             posted_slots.add(i)
                         break
 
-            # SCENIC
+            # ================= SCENIC =================
             for i,(h,m) in enumerate(SCENIC_SLOTS):
                 if i in posted_scenic_slots:
                     continue
-                if now().hour==h and now().minute==m:
 
-                    place=random.choice(SCENIC_PLACES)
-                    img=generate_image("Ultra realistic cinematic photo of "+place)
-                    res=post_fb("✨ "+place,img)
+                t = now()
+                if t.hour == h and abs(t.minute - m) <= 1:
+
+                    place = random.choice(SCENIC_PLACES)
+                    img = generate_image("Ultra realistic cinematic photo of " + place)
+                    res = post_fb("✨ " + place, img)
 
                     if "id" in res:
                         posted_scenic_slots.add(i)
+
+            # ================= CARTOON (FIXED) =================
+            for i,(h,m) in enumerate(CARTOON_SLOTS):
+                if i in posted_cartoon_slots:
+                    continue
+
+                t = now()
+                if t.hour == h and abs(t.minute - m) <= 1:
+
+                    random.shuffle(news_list)
+
+                    for news in news_list:
+                        if news["title"] in seen_news:
+                            continue
+
+                        seen_news.add(news["title"])
+
+                        ai = cartoon_generate(news["title"], news["desc"])
+                        img = generate_image(ai["image_prompt"])
+                        res = post_fb(ai["caption"], img)
+
+                        if "id" in res:
+                            posted_cartoon_slots.add(i)
+                        break
 
             time.sleep(20)
 
@@ -319,7 +290,6 @@ def scheduler():
             time.sleep(5)
 
 # ================= RUN =================
-if __name__=="__main__":
+if __name__ == "__main__":
     Thread(target=run_server, daemon=True).start()
-    Thread(target=cartoon_scheduler, daemon=True).start()
     scheduler()
