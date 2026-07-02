@@ -83,6 +83,17 @@ SCENIC_PLACES = [
     "Chicago skyline reflections on river"
 ]
 
+# ================= CARTOON NEWS SLOTS (NEW) =================
+CARTOON_SLOTS = [
+    (22, 52),
+    (10, 30),
+    (13, 30),
+    (16, 30),
+    (19, 30),
+]
+
+posted_cartoon_slots = set()
+
 # ================= LOG =================
 def log(msg):
     print(msg)
@@ -153,9 +164,7 @@ News:
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
 
-            result = json.loads(text.strip())
-
-            return result
+            return json.loads(text.strip())
 
         except:
             time.sleep(1)
@@ -168,34 +177,57 @@ def fallback(title):
         "image_prompt": "dark cinematic news photography, ultra realistic"
     }
 
-# ================= SCENIC AI GENERATOR =================
+# ================= CARTOON NEWS AI (NEW) =================
+def cartoon_generate():
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+        prompt = """
+Convert real-world news into SIMPLE CARTOON STYLE explanation.
+
+Return JSON:
+{
+ "caption": "...simple easy english...",
+ "image_prompt": "cartoon style illustration, simple shapes, colorful, educational"
+}
+
+Make it:
+- easy to understand
+- cartoon style
+- safe and non-violent presentation
+"""
+
+        r = requests.post(url, json={
+            "contents": [{"parts": [{"text": prompt}]}]
+        }, timeout=30)
+
+        data = r.json()
+
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+
+        return json.loads(text.strip())
+
+    except:
+        return {
+            "caption": "🧠 Cartoon News Update\nSimple explanation of today's events.",
+            "image_prompt": "cartoon news illustration, simple, colorful"
+        }
+
+# ================= SCENIC AI =================
 def scenic_generate():
     place = random.choice(SCENIC_PLACES)
 
-    captions = [
-        f"✨ Discover the breathtaking beauty of {place}",
-        f"🌍 Nature’s masterpiece: {place}",
-        f"📍 A stunning view of {place}",
-        f"🔥 Experience the magic of {place}"
-    ]
-
-    hashtags = "#Travel #Nature #USA #BeautifulPlaces #Photography #Explore"
-
-    prompt = f"""
-Ultra realistic cinematic photo of {place},
-golden hour lighting, 8k, professional photography, breathtaking view
-"""
-
     return {
-        "caption": random.choice(captions) + "\n\n" + hashtags,
-        "image_prompt": prompt
+        "caption": f"✨ Discover {place}\n\n#Travel #Nature #Photography",
+        "image_prompt": f"Ultra realistic cinematic photo of {place}, golden hour, 8k"
     }
 
 # ================= IMAGE =================
 def generate_image(prompt):
-    safe = urllib.parse.quote(
-        prompt + ", ultra realistic, cinematic, 4k, professional photography"
-    )
+    safe = urllib.parse.quote(prompt)
     return f"https://image.pollinations.ai/prompt/{safe}"
 
 # ================= FACEBOOK POST =================
@@ -269,7 +301,7 @@ def comment_bot():
 
         time.sleep(60)
 
-# ================= SCHEDULER =================
+# ================= MAIN SCHEDULER =================
 def scheduler():
     global posted_slots, posted_scenic_slots
 
@@ -280,7 +312,7 @@ def scheduler():
                 posted_scenic_slots = set()
                 log("NEW DAY RESET")
 
-            # -------- NEWS POSTS --------
+            # NEWS
             for i in range(len(TIME_SLOTS)):
                 if i in posted_slots:
                     continue
@@ -300,9 +332,9 @@ def scheduler():
 
                     if "id" in res:
                         posted_slots.add(i)
-                        log(f"NEWS POST SLOT {i+1}")
+                        log(f"NEWS SLOT {i+1}")
 
-            # -------- SCENIC POSTS --------
+            # SCENIC
             for i in range(len(SCENIC_SLOTS)):
                 if i in posted_scenic_slots:
                     continue
@@ -317,7 +349,7 @@ def scheduler():
 
                     if "id" in res:
                         posted_scenic_slots.add(i)
-                        log(f"SCENIC POST SLOT {i+1}")
+                        log(f"SCENIC SLOT {i+1}")
 
             time.sleep(20)
 
@@ -325,8 +357,37 @@ def scheduler():
             log(f"SCHEDULER ERROR: {e}")
             time.sleep(5)
 
+# ================= CARTOON SCHEDULER (NEW THREAD) =================
+def cartoon_scheduler():
+    global posted_cartoon_slots
+
+    while True:
+        try:
+            for i in range(len(CARTOON_SLOTS)):
+                if i in posted_cartoon_slots:
+                    continue
+
+                h, m = CARTOON_SLOTS[i]
+                if now().hour == h and now().minute == m:
+
+                    data = cartoon_generate()
+                    img = generate_image(data["image_prompt"])
+
+                    res = post_fb(data["caption"], img)
+
+                    if "id" in res:
+                        posted_cartoon_slots.add(i)
+                        log(f"CARTOON SLOT {i+1}")
+
+            time.sleep(20)
+
+        except Exception as e:
+            log(f"CARTOON ERROR: {e}")
+            time.sleep(5)
+
 # ================= START =================
 if __name__ == "__main__":
     Thread(target=run_server, daemon=True).start()
     Thread(target=comment_bot, daemon=True).start()
+    Thread(target=cartoon_scheduler, daemon=True).start()  # NEW ADD
     scheduler()
