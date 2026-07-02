@@ -258,11 +258,12 @@ def cartoon_scheduler():
 
 # ================= START =================
 def scheduler():
-    global posted_slots, posted_scenic_slots, seen_news
+    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
 
     while True:
         try:
-            if reset_time():
+            
+if reset_time():
     posted_slots = set()
     posted_scenic_slots = set()
     posted_cartoon_slots = set()
@@ -311,7 +312,7 @@ def scheduler():
             time.sleep(5)
 
 # ================= RUN =================
- if __name__=="__main__":
+if __name__=="__main__":
     Thread(target=run_server, daemon=True).start()
     Thread(target=cartoon_scheduler, daemon=True).start()
     scheduler()
