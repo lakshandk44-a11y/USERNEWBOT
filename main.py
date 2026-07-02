@@ -263,12 +263,19 @@ def scheduler():
     while True:
         try:
             
-if reset_time():
-    posted_slots = set()
-    posted_scenic_slots = set()
-    posted_cartoon_slots = set()
-    seen_news = set()
-    
+# ================= START =================
+def scheduler():
+    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
+
+    while True:
+        try:
+
+            if reset_time():
+                posted_slots = set()
+                posted_scenic_slots = set()
+                posted_cartoon_slots = set()
+                seen_news = set()
+
             news_list = get_news()
 
             # NEWS
