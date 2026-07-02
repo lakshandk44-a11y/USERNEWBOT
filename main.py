@@ -55,7 +55,7 @@ def reset_time():
 # ================= TIME SLOTS =================
 TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
 SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
-CARTOON_SLOTS = [(10,12),(10,30),(13,30),(16,30),(19,30)]
+CARTOON_SLOTS = [(7,50),(10,30),(13,30),(16,30),(19,30)]
 
 posted_slots = set()
 posted_scenic_slots = set()
@@ -100,6 +100,25 @@ def apply_monetization(text):
     return text
 
 
+# ================= 🔥 VIRAL CAPTION UPGRADE (ONLY ADDITION) =================
+def make_viral_caption(text):
+    hooks = [
+        "🚨 BREAKING:",
+        "😱 SHOCKING:",
+        "⚠️ ALERT:",
+        "🔥 JUST IN:",
+        "💥 VIRAL UPDATE:"
+    ]
+    suffix = [
+        "People are reacting strongly!",
+        "This is going viral right now!",
+        "You won't believe this!",
+        "Social media is exploding!",
+        "What do you think?"
+    ]
+    return f"{random.choice(hooks)} {text}\n\n{random.choice(suffix)}"
+
+
 # ================= NEWS =================
 def get_news():
     try:
@@ -133,16 +152,20 @@ Return:
             text = text.split("```json")[1].split("```")[0]
 
         result = json.loads(text)
-        result["caption"] = apply_monetization(result["caption"])
+
+        # 🔥 VIRAL CAPTION APPLIED
+        caption = make_viral_caption(result["caption"])
+        result["caption"] = apply_monetization(caption)
+
         return result
 
     except:
         return {
-            "caption": apply_monetization(title),
+            "caption": apply_monetization(make_viral_caption("News Update")),
             "image_prompt": "news illustration"
         }
 
-# ================= CARTOON AI (FIXED CAPTION + HASHTAGS) =================
+# ================= CARTOON AI =================
 def cartoon_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -182,17 +205,15 @@ Return JSON:
 
         result = json.loads(text)
 
-        # ================= FIX 1: caption + hashtags =================
-        caption = apply_monetization(result["caption"])
-        caption += "\n\n#BreakingNews #CartoonNews #Viral #Trending #AIArt"
-
-        result["caption"] = caption
+        # 🔥 VIRAL CAPTION APPLIED
+        caption = make_viral_caption(result["caption"])
+        result["caption"] = apply_monetization(caption)
 
         return result
 
     except:
         return {
-            "caption": apply_monetization("Cartoon News") + "\n\n#BreakingNews #CartoonNews #Viral",
+            "caption": apply_monetization(make_viral_caption("Cartoon News")),
             "image_prompt": "editorial cartoon breaking news illustration"
         }
 
@@ -209,7 +230,7 @@ def post_fb(caption, image_url):
         "access_token": FB_ACCESS_TOKEN
     }).json()
 
-# ================= START =================
+# ================= SCHEDULER (UNCHANGED) =================
 def scheduler():
     global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
 
@@ -223,7 +244,6 @@ def scheduler():
 
             news_list = get_news()
 
-            # NEWS
             for i,(h,m) in enumerate(TIME_SLOTS):
                 if i in posted_slots:
                     continue
@@ -240,7 +260,6 @@ def scheduler():
                         posted_slots.add(i)
                         break
 
-            # SCENIC
             for i,(h,m) in enumerate(SCENIC_SLOTS):
                 if i in posted_scenic_slots:
                     continue
@@ -251,7 +270,6 @@ def scheduler():
                     post_fb("✨ " + place, img)
                     posted_scenic_slots.add(i)
 
-            # CARTOON
             for i,(h,m) in enumerate(CARTOON_SLOTS):
                 if i in posted_cartoon_slots:
                     continue
