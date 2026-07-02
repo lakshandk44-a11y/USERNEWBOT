@@ -85,7 +85,7 @@ SCENIC_PLACES = [
 
 # ================= CARTOON NEWS SLOTS =================
 CARTOON_SLOTS = [
-    (23, 0),
+    (23, 30),
     (10, 30),
     (13, 30),
     (16, 30),
@@ -193,10 +193,13 @@ STYLE REQUIREMENTS:
 Return JSON:
 {
  "caption": "...simple clear explanation...",
- "image_prompt": "hand drawn editorial cartoon, newspaper style sketch, caricature, big head characters, speech bubbles, black and white ink drawing"
+ "image_prompt": "IGNORED"
 }
 
-Make it simple, funny, and easy to understand.
+IMPORTANT IMAGE PROMPT (DO NOT CHANGE):
+A grotesque, highly detailed cartoon illustration in the hyper-exaggerated animation style seen in image_0.png. The image is a close-up of a terrified man's face, identical in its extreme wide-eyed, bloodshot, and gaping-mouthed expression to the character in image_0.png. He is seated at a cluttered news desk with a microphone in front of him. A news ticker scroll is visible at the bottom of the frame, with bold, flashing text that reads, 'STOCKS CRASH: PENSIONS GONE!' The color palette is desaturated with a sickly, muted green tone, matching image_0.png, and the thick line art is prominent. Focus is on the raw, intense emotion.
+
+Make caption simple and viral.
 """
 
         r = requests.post(url, json={
@@ -210,12 +213,17 @@ Make it simple, funny, and easy to understand.
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
 
-        return json.loads(text.strip())
+        result = json.loads(text.strip())
+
+        # 🔥 FORCE FIXED IMAGE PROMPT (ONLY CHANGE)
+        result["image_prompt"] = """A grotesque, highly detailed cartoon illustration in the hyper-exaggerated animation style seen in image_0.png. The image is a close-up of a terrified man's face, identical in its extreme wide-eyed, bloodshot, and gaping-mouthed expression to the character in image_0.png. He is seated at a cluttered news desk with a microphone in front of him. A news ticker scroll is visible at the bottom of the frame, with bold, flashing text that reads, 'STOCKS CRASH: PENSIONS GONE!' The color palette is desaturated with a sickly, muted green tone, matching image_0.png, and the thick line art is prominent. Focus is on the raw, intense emotion."""
+
+        return result
 
     except:
         return {
             "caption": "📰 Cartoon News Update",
-            "image_prompt": "hand drawn newspaper cartoon, simple sketch style"
+            "image_prompt": """A grotesque, highly detailed cartoon illustration in the hyper-exaggerated animation style seen in image_0.png. The image is a close-up of a terrified man's face, identical in its extreme wide-eyed, bloodshot, and gaping-mouthed expression to the character in image_0.png. He is seated at a cluttered news desk with a microphone in front of him. A news ticker scroll is visible at the bottom of the frame, with bold, flashing text that reads, 'STOCKS CRASH: PENSIONS GONE!' The color palette is desaturated with a sickly, muted green tone, matching image_0.png, and the thick line art is prominent. Focus is on the raw, intense emotion."""
         }
 
 # ================= SCENIC AI =================
