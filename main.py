@@ -38,37 +38,14 @@ def reset_time():
     return t.hour == 0 and t.minute < 5
 
 # ================= TIME SLOTS =================
-TIME_SLOTS = [
-    (6, 0),
-    (8, 0),
-    (10, 0),
-    (12, 0),
-    (14, 0),
-    (16, 0),
-    (18, 0),
-    (20, 0),
-    (22, 0),
-    (23, 30),
-]
+TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
+SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
+CARTOON_SLOTS = [(23,37),(10,30),(13,30),(16,30),(19,30)]
 
 posted_slots = set()
-seen_comments = set()
-
-# ================= SCENIC IMAGE SLOTS =================
-SCENIC_SLOTS = [
-    (7, 0),
-    (9, 0),
-    (11, 0),
-    (13, 0),
-    (15, 15),
-    (17, 0),
-    (19, 0),
-    (21, 0),
-    (22, 30),
-    (23, 45),
-]
-
 posted_scenic_slots = set()
+posted_cartoon_slots = set()
+seen_comments = set()
 
 SCENIC_PLACES = [
     "Grand Canyon, USA",
@@ -83,250 +60,132 @@ SCENIC_PLACES = [
     "Chicago skyline reflections on river"
 ]
 
-# ================= CARTOON NEWS SLOTS =================
-CARTOON_SLOTS = [
-    (23, 30),
-    (10, 30),
-    (13, 30),
-    (16, 30),
-    (19, 30),
-]
-
-posted_cartoon_slots = set()
-
 # ================= LOG =================
 def log(msg):
     print(msg)
     try:
         if DISCORD_WEBHOOK_URL:
-            requests.post(DISCORD_WEBHOOK_URL, json={
-                "content": f"""
-🚀 **FACEBOOK BOT UPDATE**
-
-🧠 Status:
-{msg}
-
-⏰ Time: {now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
-            })
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
     except:
         pass
 
 # ================= NEWS =================
 def get_news():
     try:
-        feed = feedparser.parse(
-            "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"
-        )
-
-        items = []
-        for e in feed.entries[:20]:
-            items.append({
-                "title": e.title,
-                "desc": getattr(e, "summary", e.title)
-            })
-        return items
-    except Exception as e:
-        log(f"News error: {e}")
+        feed = feedparser.parse("https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en")
+        return [{"title":e.title,"desc":getattr(e,"summary",e.title)} for e in feed.entries[:20]]
+    except:
         return []
 
-# ================= GEMINI NEWS AI =================
+# ================= AI NEWS =================
 def ai_generate(title, desc):
-    for attempt in range(2):
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-
-            prompt = f"""
-Create viral Facebook news caption + image prompt.
-
-Return JSON:
-{{
- "caption": "...",
- "image_prompt": "..."
-}}
-
-News:
-{title}
-{desc}
-"""
-
-            r = requests.post(url, json={
-                "contents": [{"parts": [{"text": prompt}]}]
-            }, timeout=30)
-
-            data = r.json()
-
-            if "candidates" not in data:
-                continue
-
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0]
-
-            return json.loads(text.strip())
-
-        except:
-            time.sleep(1)
-
-    return {
-        "caption": f"🚨 Breaking Update: {title}\n\n#BreakingNews #WorldNews",
-        "image_prompt": "dark cinematic news photography"
-    }
-
-# ================= CARTOON NEWS AI (FIXED STYLE) =================
-def cartoon_generate():
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-        prompt = """
-Convert news into HAND DRAWN NEWSPAPER STYLE CARTOON.
+        prompt = f"""
+Create viral Facebook caption + image prompt JSON.
 
-STYLE REQUIREMENTS:
-- black and white sketch or simple hand drawn cartoon
-- exaggerated characters (big heads, expressive faces)
-- like political newspaper cartoons
-- include speech bubbles in image concept
-- simple background, minimal detail
-- easy to understand visual storytelling
+NEWS:
+{title}
+{desc}
 
-Return JSON:
-{
- "caption": "...simple clear explanation...",
- "image_prompt": "IGNORED"
-}
-
-IMPORTANT IMAGE PROMPT (DO NOT CHANGE):
-A grotesque, highly detailed cartoon illustration in the hyper-exaggerated animation style seen in image_0.png. The image is a close-up of a terrified man's face, identical in its extreme wide-eyed, bloodshot, and gaping-mouthed expression to the character in image_0.png. He is seated at a cluttered news desk with a microphone in front of him. A news ticker scroll is visible at the bottom of the frame, with bold, flashing text that reads, 'STOCKS CRASH: PENSIONS GONE!' The color palette is desaturated with a sickly, muted green tone, matching image_0.png, and the thick line art is prominent. Focus is on the raw, intense emotion.
-
-Make caption simple and viral.
+Return:
+{{"caption":"...","image_prompt":"..."}}
 """
 
-        r = requests.post(url, json={
-            "contents": [{"parts": [{"text": prompt}]}]
-        }, timeout=30)
-
-        data = r.json()
-
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
 
-        result = json.loads(text.strip())
+        return json.loads(text)
+    except:
+        return {"caption":title,"image_prompt":"news illustration"}
 
-        # 🔥 FORCE FIXED IMAGE PROMPT (ONLY CHANGE)
-        result["image_prompt"] = """A grotesque, highly detailed cartoon illustration in the hyper-exaggerated animation style seen in image_0.png. The image is a close-up of a terrified man's face, identical in its extreme wide-eyed, bloodshot, and gaping-mouthed expression to the character in image_0.png. He is seated at a cluttered news desk with a microphone in front of him. A news ticker scroll is visible at the bottom of the frame, with bold, flashing text that reads, 'STOCKS CRASH: PENSIONS GONE!' The color palette is desaturated with a sickly, muted green tone, matching image_0.png, and the thick line art is prominent. Focus is on the raw, intense emotion."""
+# ================= CARTOON AI (DYNAMIC) =================
+def cartoon_generate(title, desc):
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+        text = (title + " " + desc).lower()
+
+        if any(k in text for k in ["war","attack","military","bomb"]):
+            character = "a frightened soldier in uniform"
+        elif any(k in text for k in ["money","bank","stock","economy","crash"]):
+            character = "a stressed businessman in suit"
+        elif any(k in text for k in ["president","election","government","politics"]):
+            character = "a shocked politician at a news desk"
+        elif any(k in text for k in ["sports","cricket","football","match"]):
+            character = "an exhausted athlete reacting emotionally"
+        else:
+            character = "a terrified news reporter"
+
+        prompt = f"""
+Turn news into editorial cartoon.
+
+NEWS:
+{title}
+{desc}
+
+Character MUST be:
+{character}
+
+Return JSON:
+{{"caption":"simple viral caption","image_prompt":"ignored"}}
+"""
+
+        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+
+        result = json.loads(text)
+
+        result["image_prompt"] = f"""
+A grotesque hand-drawn editorial cartoon. {character} in extreme close-up, exaggerated facial expression, sitting at news desk with microphone. thick ink sketch style, minimal background, sickly green tone. News ticker about: {title}
+"""
 
         return result
-
     except:
-        return {
-            "caption": "📰 Cartoon News Update",
-            "image_prompt": """A grotesque, highly detailed cartoon illustration in the hyper-exaggerated animation style seen in image_0.png. The image is a close-up of a terrified man's face, identical in its extreme wide-eyed, bloodshot, and gaping-mouthed expression to the character in image_0.png. He is seated at a cluttered news desk with a microphone in front of him. A news ticker scroll is visible at the bottom of the frame, with bold, flashing text that reads, 'STOCKS CRASH: PENSIONS GONE!' The color palette is desaturated with a sickly, muted green tone, matching image_0.png, and the thick line art is prominent. Focus is on the raw, intense emotion."""
-        }
+        return {"caption":"Cartoon news","image_prompt":"editorial cartoon sketch"}
 
-# ================= SCENIC AI =================
+# ================= SCENIC =================
 def scenic_generate():
     place = random.choice(SCENIC_PLACES)
-
     return {
-        "caption": f"✨ Discover {place}\n\n#Travel #Nature #Photography",
+        "caption": f"✨ {place}\n#Travel",
         "image_prompt": f"Ultra realistic cinematic photo of {place}"
     }
 
 # ================= IMAGE =================
 def generate_image(prompt):
-    safe = urllib.parse.quote(prompt)
-    return f"https://image.pollinations.ai/prompt/{safe}"
+    return "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt)
 
-# ================= FACEBOOK POST =================
+# ================= POST =================
 def post_fb(caption, image_url):
-    try:
-        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
-
-        res = requests.post(url, data={
-            "url": image_url,
-            "caption": caption,
-            "access_token": FB_ACCESS_TOKEN
-        })
-
-        return res.json()
-
-    except Exception as e:
-        log(f"FB ERROR: {e}")
-        return {"error": str(e)}
-
-# ================= COMMENT BOT =================
-def comment_bot():
-    while True:
-        try:
-            posts = requests.get(
-                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/posts",
-                params={"access_token": FB_ACCESS_TOKEN}
-            ).json()
-
-            if "data" not in posts:
-                time.sleep(30)
-                continue
-
-            for post in posts["data"][:5]:
-                post_id = post["id"]
-
-                comments = requests.get(
-                    f"https://graph.facebook.com/v20.0/{post_id}/comments",
-                    params={"access_token": FB_ACCESS_TOKEN}
-                ).json()
-
-                if "data" not in comments:
-                    continue
-
-                for c in comments["data"]:
-                    cid = c["id"]
-
-                    if cid in seen_comments:
-                        continue
-
-                    seen_comments.add(cid)
-
-                    reply = random.choice([
-                        "Thanks 🙌",
-                        "Interesting 👍",
-                        "Good point 👀",
-                        "Appreciate it ❤️"
-                    ])
-
-                    requests.post(
-                        f"https://graph.facebook.com/v20.0/{cid}/comments",
-                        data={
-                            "message": reply,
-                            "access_token": FB_ACCESS_TOKEN
-                        }
-                    )
-
-                    time.sleep(5)
-
-        except Exception as e:
-            log(f"COMMENT ERROR: {e}")
-
-        time.sleep(60)
+    url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
+    return requests.post(url, data={
+        "url": image_url,
+        "caption": caption,
+        "access_token": FB_ACCESS_TOKEN
+    }).json()
 
 # ================= CARTOON SCHEDULER =================
 def cartoon_scheduler():
     global posted_cartoon_slots
-
     while True:
         try:
-            for i in range(len(CARTOON_SLOTS)):
+            for i,(h,m) in enumerate(CARTOON_SLOTS):
                 if i in posted_cartoon_slots:
                     continue
+                if now().hour==h and now().minute==m:
 
-                h, m = CARTOON_SLOTS[i]
-                if now().hour == h and now().minute == m:
+                    news = random.choice(get_news())
+                    data = cartoon_generate(news["title"], news["desc"])
 
-                    data = cartoon_generate()
                     img = generate_image(data["image_prompt"])
-
                     res = post_fb(data["caption"], img)
 
                     if "id" in res:
@@ -334,9 +193,8 @@ def cartoon_scheduler():
                         log(f"CARTOON SLOT {i+1}")
 
             time.sleep(20)
-
         except Exception as e:
-            log(f"CARTOON ERROR: {e}")
+            log(str(e))
             time.sleep(5)
 
 # ================= MAIN SCHEDULER =================
@@ -346,58 +204,38 @@ def scheduler():
     while True:
         try:
             if reset_time():
-                posted_slots = set()
-                posted_scenic_slots = set()
-                log("NEW DAY RESET")
+                posted_slots=set()
+                posted_scenic_slots=set()
 
             # NEWS
-            for i in range(len(TIME_SLOTS)):
-                if i in posted_slots:
-                    continue
-
-                h, m = TIME_SLOTS[i]
-                if now().hour == h and now().minute == m:
-
-                    news = get_news()
-                    if not news:
-                        continue
-
-                    pick = random.choice(news)
-                    ai = ai_generate(pick["title"], pick["desc"])
-                    img = generate_image(ai["image_prompt"])
-
-                    res = post_fb(ai["caption"], img)
-
+            for i,(h,m) in enumerate(TIME_SLOTS):
+                if i in posted_slots: continue
+                if now().hour==h and now().minute==m:
+                    news=random.choice(get_news())
+                    ai=ai_generate(news["title"],news["desc"])
+                    img=generate_image(ai["image_prompt"])
+                    res=post_fb(ai["caption"],img)
                     if "id" in res:
                         posted_slots.add(i)
-                        log(f"NEWS SLOT {i+1}")
 
             # SCENIC
-            for i in range(len(SCENIC_SLOTS)):
-                if i in posted_scenic_slots:
-                    continue
-
-                h, m = SCENIC_SLOTS[i]
-                if now().hour == h and now().minute == m:
-
-                    scenic = scenic_generate()
-                    img = generate_image(scenic["image_prompt"])
-
-                    res = post_fb(scenic["caption"], img)
-
+            for i,(h,m) in enumerate(SCENIC_SLOTS):
+                if i in posted_scenic_slots: continue
+                if now().hour==h and now().minute==m:
+                    sc=scenic_generate()
+                    img=generate_image(sc["image_prompt"])
+                    res=post_fb(sc["caption"],img)
                     if "id" in res:
                         posted_scenic_slots.add(i)
-                        log(f"SCENIC SLOT {i+1}")
 
             time.sleep(20)
 
         except Exception as e:
-            log(f"SCHEDULER ERROR: {e}")
+            log(str(e))
             time.sleep(5)
 
 # ================= START =================
-if __name__ == "__main__":
-    Thread(target=run_server, daemon=True).start()
-    Thread(target=comment_bot, daemon=True).start()
-    Thread(target=cartoon_scheduler, daemon=True).start()
+if __name__=="__main__":
+    Thread(target=run_server,daemon=True).start()
+    Thread(target=cartoon_scheduler,daemon=True).start()
     scheduler()
