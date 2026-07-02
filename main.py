@@ -17,7 +17,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # ================= MONETIZATION SETTINGS =================
-MONETIZATION_MODE = "affiliate"   # affiliate | sponsor | off
+MONETIZATION_MODE = "affiliate"
 
 AFFILIATE_LINKS = [
     "https://example.com/deal1",
@@ -55,7 +55,7 @@ def reset_time():
 # ================= TIME SLOTS =================
 TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
 SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
-CARTOON_SLOTS = [(9,45),(10,30),(13,30),(16,30),(19,30)]
+CARTOON_SLOTS = [(9,59),(10,30),(13,30),(16,30),(19,30)]
 
 posted_slots = set()
 posted_scenic_slots = set()
@@ -84,7 +84,7 @@ def log(msg):
     except:
         pass
 
-# ================= MONETIZATION ENGINE =================
+# ================= MONETIZATION =================
 def apply_monetization(text):
     if MONETIZATION_MODE == "off":
         return text
@@ -132,9 +132,7 @@ Return:
             text = text.split("```json")[1].split("```")[0]
 
         result = json.loads(text)
-
         result["caption"] = apply_monetization(result["caption"])
-
         return result
 
     except:
@@ -143,33 +141,50 @@ Return:
             "image_prompt": "news illustration"
         }
 
-# ================= CARTOON AI =================
+# ================= CARTOON AI (UPDATED STYLE SYSTEM) =================
 def cartoon_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         text = (title + " " + desc).lower()
 
+        # dynamic character logic (unchanged idea, improved variety)
         if any(k in text for k in ["war","attack","military","bomb"]):
-            character = "a frightened soldier in uniform"
+            character = "terrified soldier screaming in chaos"
         elif any(k in text for k in ["money","bank","stock","economy","crash"]):
-            character = "a stressed businessman in suit"
+            character = "panic-stricken businessman at collapsing stock market screen"
         elif any(k in text for k in ["president","government","politics"]):
-            character = "a shocked politician at a news desk"
+            character = "shocked politician sweating under press lights"
         elif any(k in text for k in ["sports","cricket","football"]):
-            character = "an exhausted athlete reacting emotionally"
+            character = "exhausted athlete collapsing after dramatic moment"
         else:
-            character = "a terrified news reporter"
+            character = "horrified news reporter in breaking news studio"
 
+        # 🔥 YOUR STYLE PROMPT (ENHANCED + DYNAMIC)
         prompt = f"""
+Create a grotesque, highly detailed cartoon illustration in a hyper-exaggerated editorial news style.
+
 NEWS:
 {title}
 {desc}
 
-Character: {character}
+CHARACTER:
+{character}
 
-Return JSON:
-{{"caption":"viral caption","image_prompt":"ignored"}}
+STYLE REQUIREMENTS:
+- Extreme facial expression (wide eyes, fear, shock)
+- Close-up framing like breaking news reaction shot
+- Seated at cluttered news desk with microphone
+- News ticker visible with related text about the event
+- Desaturated, sickly green/grey tone palette
+- Thick bold ink line art, editorial cartoon style
+- Dramatic lighting, high emotional intensity
+
+IMPORTANT STYLE REFERENCE:
+"A grotesque, highly detailed cartoon illustration in a hyper-exaggerated animation style. Close-up terrified expression, news desk, microphone, breaking news ticker, sickly green tone, thick line art, extreme emotion."
+
+Return JSON only:
+{{"caption":"viral caption","image_prompt":"detailed prompt"}}
 """
 
         r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
@@ -182,16 +197,12 @@ Return JSON:
 
         result["caption"] = apply_monetization(result["caption"])
 
-        result["image_prompt"] = f"""
-A grotesque editorial cartoon, {character}, extreme close-up, ink sketch style, news desk, microphone, news about {title}
-"""
-
         return result
 
     except:
         return {
             "caption": apply_monetization("Cartoon News"),
-            "image_prompt": "editorial cartoon sketch"
+            "image_prompt": "editorial cartoon breaking news illustration"
         }
 
 # ================= IMAGE =================
@@ -207,7 +218,7 @@ def post_fb(caption, image_url):
         "access_token": FB_ACCESS_TOKEN
     }).json()
 
-# ================= START =================
+# ================= RUNNER (UNCHANGED LOGIC) =================
 def scheduler():
     global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
 
@@ -221,7 +232,7 @@ def scheduler():
 
             news_list = get_news()
 
-            # ================= NEWS =================
+            # NEWS
             for i,(h,m) in enumerate(TIME_SLOTS):
                 if i in posted_slots:
                     continue
@@ -244,7 +255,7 @@ def scheduler():
                             posted_slots.add(i)
                         break
 
-            # ================= SCENIC =================
+            # SCENIC
             for i,(h,m) in enumerate(SCENIC_SLOTS):
                 if i in posted_scenic_slots:
                     continue
@@ -259,7 +270,7 @@ def scheduler():
                     if "id" in res:
                         posted_scenic_slots.add(i)
 
-            # ================= CARTOON (FIXED) =================
+            # CARTOON (UNCHANGED LOGIC)
             for i,(h,m) in enumerate(CARTOON_SLOTS):
                 if i in posted_cartoon_slots:
                     continue
@@ -289,7 +300,7 @@ def scheduler():
             log(str(e))
             time.sleep(5)
 
-# ================= RUN =================
+# ================= START =================
 if __name__ == "__main__":
     Thread(target=run_server, daemon=True).start()
     scheduler()
