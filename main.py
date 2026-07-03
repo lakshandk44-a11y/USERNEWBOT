@@ -62,6 +62,11 @@ posted_scenic_slots = set()
 posted_cartoon_slots = set()
 seen_news = set()
 
+# ================= SCENIC DAILY SYSTEM =================
+scenic_daily_places = []
+scenic_used_today = set()
+scenic_last_date = None
+
 SCENIC_PLACES = [
     "Grand Canyon, USA",
     "Yellowstone National Park",
@@ -84,8 +89,7 @@ def log(msg):
     except:
         pass
 
-
-# ================= FIX 1: MONETIZATION =================
+# ================= MONETIZATION =================
 def apply_monetization(text):
     if MONETIZATION_MODE == "off":
         return text
@@ -100,7 +104,6 @@ def apply_monetization(text):
 
     return text
 
-
 # ================= NEWS =================
 def get_news():
     try:
@@ -110,7 +113,6 @@ def get_news():
         return [{"title":e.title,"desc":getattr(e,"summary",e.title)} for e in feed.entries[:20]]
     except:
         return []
-
 
 # ================= AI NEWS =================
 def ai_generate(title, desc):
@@ -135,9 +137,7 @@ Return:
             text = text.split("```json")[1].split("```")[0]
 
         result = json.loads(text)
-
         result["caption"] = apply_monetization(result["caption"])
-
         return result
 
     except:
@@ -145,7 +145,6 @@ Return:
             "caption": apply_monetization("News Update"),
             "image_prompt": "news illustration"
         }
-
 
 # ================= VIRAL CAPTION =================
 def make_viral_caption(text):
@@ -158,29 +157,10 @@ def make_viral_caption(text):
     ]
     return f"{random.choice(hooks)} {text}\n\n{random.choice(suffix)}"
 
-
-# ================= CARTOON AI (ONLY FIXED CAPTION STYLE) =================
+# ================= CARTOON =================
 def cartoon_generate(title, desc):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-
-        text = (title + " " + desc).lower()
-
-        if any(k in text for k in ["war","attack","military","bomb","conflict"]):
-            category = "war"
-            emoji = "⚔️"
-        elif any(k in text for k in ["money","bank","stock","economy","loan","imf","debt"]):
-            category = "finance"
-            emoji = "💰"
-        elif any(k in text for k in ["politics","government","president","election"]):
-            category = "politics"
-            emoji = "🏛️"
-        elif any(k in text for k in ["sports","cricket","football"]):
-            category = "sports"
-            emoji = "🏆"
-        else:
-            category = "general"
-            emoji = "📰"
 
         prompt = f"""
 Editorial cartoon news illustration.
@@ -201,8 +181,7 @@ Return JSON:
 
         result = json.loads(text)
 
-        # ================= FIX 2 ONLY =================
-        caption = f"""{emoji} {result["caption"]}
+        caption = f"""🖼 {result["caption"]}
 
 📌 {title}
 
@@ -212,20 +191,79 @@ Return JSON:
 """
 
         result["caption"] = apply_monetization(caption.strip())
-
         return result
 
     except:
         return {
-            "caption": apply_monetization("📰 Breaking News Update\n\n#Viral #News"),
-            "image_prompt": "editorial cartoon illustration"
+            "caption": apply_monetization("News Update"),
+            "image_prompt": "editorial cartoon"
         }
 
+# ================= SCENIC DAILY AI SYSTEM (OPTIMIZED) =================
+def get_daily_scenic_pool():
+    global scenic_daily_places, scenic_last_date
+
+    today = now().date()
+
+    if scenic_last_date != today or len(scenic_daily_places) == 0:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+            prompt = """
+Generate 10 UNIQUE viral scenic travel destinations for today.
+
+Rules:
+- Must be real-world places
+- Must be highly photogenic
+- Must be different from common repeats
+
+Return ONLY JSON array:
+["place1","place2",...]
+"""
+
+            r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+
+            scenic_daily_places = json.loads(text)
+            scenic_last_date = today
+            scenic_used_today.clear()
+
+        except:
+            scenic_daily_places = random.sample(SCENIC_PLACES, 10)
+            scenic_last_date = today
+            scenic_used_today.clear()
+
+    return scenic_daily_places
+
+def scenic_generate():
+    pool = get_daily_scenic_pool()
+
+    available = [p for p in pool if p not in scenic_used_today]
+
+    if not available:
+        scenic_used_today.clear()
+        available = pool
+
+    place = random.choice(available)
+    scenic_used_today.add(place)
+
+    return {
+        "caption": f"""✨ {place}
+
+🌍 Experience the beauty of this breathtaking destination.
+
+🔥 Travel inspiration for your bucket list!
+
+#Travel #Nature #Wanderlust #Explore #Scenic #BeautifulPlaces #TravelGram""",
+        "image_prompt": f"Ultra realistic cinematic drone photography, golden hour lighting, highly detailed travel photo of {place}"
+    }
 
 # ================= IMAGE =================
 def generate_image(prompt):
     return "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt)
-
 
 # ================= POST =================
 def post_fb(caption, image_url):
@@ -235,7 +273,6 @@ def post_fb(caption, image_url):
         "caption": caption,
         "access_token": FB_ACCESS_TOKEN
     }).json()
-
 
 # ================= SCHEDULER =================
 def scheduler():
@@ -272,9 +309,9 @@ def scheduler():
                     continue
                 t = now()
                 if t.hour == h and abs(t.minute - m) <= 1:
-                    place = random.choice(SCENIC_PLACES)
-                    img = generate_image("Ultra realistic cinematic photo of " + place)
-                    post_fb("✨ " + place, img)
+                    ai = scenic_generate()
+                    img = generate_image(ai["image_prompt"])
+                    post_fb(ai["caption"], img)
                     posted_scenic_slots.add(i)
 
             for i,(h,m) in enumerate(CARTOON_SLOTS):
@@ -298,7 +335,6 @@ def scheduler():
         except Exception as e:
             log(str(e))
             time.sleep(5)
-
 
 # ================= RUN =================
 if __name__ == "__main__":
