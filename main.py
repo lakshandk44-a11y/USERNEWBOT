@@ -186,17 +186,7 @@ def log(msg):
 
 # ================= MONETIZATION =================
 def apply_monetization(text):
-    if MONETIZATION_MODE == "off":
-        return text
-
-    if MONETIZATION_MODE == "affiliate":
-        link = random.choice(AFFILIATE_LINKS)
-        return text + f"\n\n👉 Recommended Offer:\n{link}"
-
-    if MONETIZATION_MODE == "sponsor":
-        sponsor = random.choice(SPONSORS)
-        return text + f"\n\nSponsored by {sponsor}"
-
+    # Affiliate link removal: always return text unchanged
     return text
 
 # ================= NEWS =================
