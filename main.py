@@ -62,6 +62,101 @@ posted_scenic_slots = set()
 posted_cartoon_slots = set()
 seen_news = set()
 
+# ================= HOLIDAY CONFIG =================
+HOLIDAYS = {
+    "07-04": "🎆 Happy Independence Day, America!",
+    "10-31": "🎃 Happy Halloween! Stay spooky!",
+    "12-25": "🎄 Merry Christmas! Wishing you joy and peace!",
+    "01-01": "🎉 Happy New Year! Welcome 2026!",
+    "02-14": "💘 Happy Valentine's Day! Spread the love!",
+    "05-12": "👩 Happy Mother's Day!",
+    "06-21": "👨 Happy Father's Day!",
+}
+
+holiday_posted_today = False
+
+def holiday_generate(holiday_title):
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+        prompt = f"""
+Generate a beautiful, artistic, cinematic greeting post for this holiday:
+
+{holiday_title}
+
+Rules:
+- Caption must be warm, heartfelt, and viral-friendly
+- Dark, moody, cinematic aesthetic
+- Unique artistic style — not generic stock photo
+
+Return ONLY JSON:
+{{"caption":"...", "image_prompt":"..."}}
+"""
+
+        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+
+        result = json.loads(text)
+        return result
+    except:
+        return {
+            "caption": holiday_title,
+            "image_prompt": f"Dark cinematic moody artistic illustration, {holiday_title}, highly detailed, dramatic lighting"
+        }
+
+# ================= AUTO REPLY TO COMMENTS =================
+last_replied_comment_ids = set()
+
+def get_recent_comments():
+    try:
+        url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed?fields=id,comments{{id,message,created_time}}&access_token={FB_ACCESS_TOKEN}"
+        r = requests.get(url)
+        data = r.json()
+
+        comments = []
+        for post in data.get("data", []):
+            if "comments" in post:
+                for comment in post["comments"].get("data", []):
+                    comments.append(comment)
+        return comments
+    except:
+        return []
+
+def auto_reply_to_comment(comment_id, comment_text):
+    try:
+        prompt = f"""
+Reply to this Facebook comment in a friendly, engaging, and natural way.
+Keep it short (1-2 sentences). Be helpful and warm.
+
+Comment: {comment_text}
+
+Reply:
+"""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+        reply_text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        reply_url = f"https://graph.facebook.com/v20.0/{comment_id}/replies"
+        requests.post(reply_url, data={
+            "message": reply_text,
+            "access_token": FB_ACCESS_TOKEN
+        })
+        log(f"Replied to comment {comment_id}: {reply_text}")
+    except:
+        pass
+
+def process_auto_replies():
+    global last_replied_comment_ids
+    comments = get_recent_comments()
+    for comment in comments:
+        cid = comment["id"]
+        if cid not in last_replied_comment_ids:
+            last_replied_comment_ids.add(cid)
+            auto_reply_to_comment(cid, comment.get("message", ""))
+
 # ================= SCENIC DAILY SYSTEM =================
 scenic_daily_places = []
 scenic_used_today = set()
@@ -276,7 +371,7 @@ def post_fb(caption, image_url):
 
 # ================= SCHEDULER =================
 def scheduler():
-    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news
+    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news, holiday_posted_today
 
     while True:
         try:
@@ -285,7 +380,22 @@ def scheduler():
                 posted_scenic_slots=set()
                 posted_cartoon_slots=set()
                 seen_news=set()
+                holiday_posted_today = False
 
+            # ===== AUTO REPLY TO COMMENTS =====
+            process_auto_replies()
+
+            # ===== HOLIDAY POST =====
+            today_str = now().strftime("%m-%d")
+            if today_str in HOLIDAYS and not holiday_posted_today and now().hour == 7 and now().minute < 2:
+                holiday_title = HOLIDAYS[today_str]
+                holiday_data = holiday_generate(holiday_title)
+                img = generate_image(holiday_data["image_prompt"])
+                post_fb(holiday_data["caption"], img)
+                holiday_posted_today = True
+                log(f"Holiday post uploaded: {holiday_title}")
+
+            # ===== REGULAR NEWS POSTS =====
             news_list = get_news()
 
             for i,(h,m) in enumerate(TIME_SLOTS):
