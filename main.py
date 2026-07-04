@@ -641,7 +641,7 @@ class SriLanka2050Bot:
 
     def __init__(self):
         self.gemini = GeminiGenerator(GEMINI_API_KEY)
-        self.facebook = FacebookPublisher(FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN)
+        self.facebook = FacebookPublisher(FB_PAGE_ID, FB_ACCESS_TOKEN)
         self.scheduler = PostScheduler()
         
         # === 10 CATEGORIES (Non-political) ===
@@ -835,11 +835,11 @@ def main():
         logger.error("   Then run: export GEMINI_API_KEY='your-key-here'")
         return
     
-    if "YOUR_FACEBOOK_PAGE_TOKEN_HERE" in FACEBOOK_PAGE_ACCESS_TOKEN:
+    if "YOUR_FACEBOOK_PAGE_TOKEN_HERE" in FB_ACCESS_TOKEN:
         logger.error("❌ Please set your FACEBOOK_PAGE_ACCESS_TOKEN!")
         return
     
-    if "YOUR_FACEBOOK_PAGE_ID_HERE" in FACEBOOK_PAGE_ID:
+    if "YOUR_FACEBOOK_PAGE_ID_HERE" in FB_PAGE_ID:
         logger.error("❌ Please set your FACEBOOK_PAGE_ID!")
         return
     
