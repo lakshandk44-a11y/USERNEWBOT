@@ -32,7 +32,7 @@ pip install --upgrade google-genai requests schedule python-dotenv Pillow
 
 # --- API Keys (Set as environment variables or use .env file) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "YOUR_FB_PAGE_TOKEN_HERE")
+FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN", "YOUR_FB_TOKEN_HERE")
 FB_PAGE_ID = os.getenv("FB_PAGE_ID", "YOUR_FB_PAGE_ID_HERE")
 
 # --- Paths ---
