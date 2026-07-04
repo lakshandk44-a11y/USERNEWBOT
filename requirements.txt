@@ -1,5 +1,4 @@
-google-genai
 requests
-schedule
-python-dotenv
-Pillow
+feedparser
+pytz
+flask
