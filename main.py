@@ -294,7 +294,7 @@ Return JSON:
             "image_prompt": "editorial cartoon"
         }
 
-# ================= SCENIC DAILY AI SYSTEM (OPTIMIZED) =================
+# ================= SCENIC DAILY AI SYSTEM (UPDATED PROMPT) =================
 def get_daily_scenic_pool():
     global scenic_daily_places, scenic_last_date
 
@@ -346,9 +346,18 @@ def scenic_generate():
     scenic_used_today.add(place)
 
     image_prompt = (
-        f"A charming, picturesque, hyper-detailed photograph of {place}. "
-        f"Clear blue water reflecting the sky, fluffy white clouds. "
-        f"8k resolution, cinematic lighting."
+        f"An enchanting, award-winning, hyper-realistic drone perspective photograph of {place}, "
+        f"capturing a deeply nested, vast river valley set between towering, massive, multi-layered red and orange rock peaks. "
+        f"The scene is exactly like image_2.png and image_1.png combined, but with enhanced ultra-high resolution and clarity. "
+        f"A winding, glacial-turquoise Colorado River flows prominently through the rugged scenery, featuring crystal-clear water "
+        f"with flawlessly detailed reflections of dramatic, massive, multi-tiered cotton-white clouds. "
+        f"The composition is a precise blend of image_1.png's aerial village logic and image_2.png's detailed chalet-style structures "
+        f"(imagined as a tourist lodge village), deeply embedded along the riverbanks with a clear church steeple and intricate network of stone paths. "
+        f"32k resolution, extreme sharpness, no filter, natural film grain. "
+        f"Shot on a Phase One IQ4 camera with a 35mm lens, f/11, 1/160s, ISO 100. "
+        f"Cinematic, golden hour lighting with long, defined shadows, volumetric haze, and extreme macro and micro-detail across all rock textures, foliage, and structures. "
+        f"Fujifilm Velvia film simulation applied for rich, natural color. "
+        f"A flawlessly pristine, highly photorealistic masterpiece."
     )
 
     return {
