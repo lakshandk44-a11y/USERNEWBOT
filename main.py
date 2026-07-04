@@ -186,7 +186,17 @@ def log(msg):
 
 # ================= MONETIZATION =================
 def apply_monetization(text):
-    # AFFILIATE LINK REMOVED - caption stays as-is, no link added
+    if MONETIZATION_MODE == "off":
+        return text
+
+    if MONETIZATION_MODE == "affiliate":
+        link = random.choice(AFFILIATE_LINKS)
+        return text + f"\n\n👉 Recommended Offer:\n{link}"
+
+    if MONETIZATION_MODE == "sponsor":
+        sponsor = random.choice(SPONSORS)
+        return text + f"\n\nSponsored by {sponsor}"
+
     return text
 
 # ================= NEWS =================
@@ -335,6 +345,15 @@ def scenic_generate():
     place = random.choice(available)
     scenic_used_today.add(place)
 
+    # ====== IMPROVED IMAGE PROMPT — cinematic, hyper-detailed, 8k style ======
+    image_prompt = (
+        f"A charming, picturesque, hyper-detailed photograph of {place}. "
+        f"Ultra-realistic, cinematic lighting, 8k resolution, photorealistic, "
+        f"majestic scenery, clear blue sky with soft white clouds, "
+        f"reflections on water, lush green landscape, highly detailed, "
+        f"award-winning travel photography, breathtaking panoramic view."
+    )
+
     return {
         "caption": f"""✨ {place}
 
@@ -343,7 +362,7 @@ def scenic_generate():
 🔥 Travel inspiration for your bucket list!
 
 #Travel #Nature #Wanderlust #Explore #Scenic #BeautifulPlaces #TravelGram""",
-        "image_prompt": f"Ultra realistic cinematic drone photography, golden hour lighting, highly detailed travel photo of {place}"
+        "image_prompt": image_prompt
     }
 
 # ================= IMAGE =================
