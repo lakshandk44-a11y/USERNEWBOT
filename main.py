@@ -53,9 +53,9 @@ def reset_time():
     return t.hour == 0 and t.minute < 5
 
 # ================= TIME SLOTS =================
-TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
-SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
-CARTOON_SLOTS = [(7,35),(12,35),(13,26),(16,30),(19,30)]
+TIME_SLOTS = [(6,0),(8,0),(10,5),(12,0),(14,0),(16,0),(18,0),(20,0),(22,5),(23,30)]
+SCENIC_SLOTS = [(7,0),(10,6),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,8),(23,45)]
+CARTOON_SLOTS = [(7,15),(12,15),(13,26),(16,30),(22,10)]
 
 posted_slots = set()
 posted_scenic_slots = set()
@@ -186,7 +186,7 @@ def log(msg):
 
 # ================= MONETIZATION =================
 def apply_monetization(text):
-    # Affiliate link removal: always return text unchanged
+    # AFFILIATE LINK REMOVED - caption stays as-is, no link added
     return text
 
 # ================= NEWS =================
