@@ -31,14 +31,13 @@ tz = pytz.timezone("Asia/Colombo")
 def now():
     return datetime.now(tz)
 
-TIME_SLOTS = [(6,0),(8,0),(10,30),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
-SCENIC_SLOTS = [(7,0),(9,0),(10,32),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
+TIME_SLOTS = [(6,0),(8,0),(10,45),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
+SCENIC_SLOTS = [(7,0),(9,0),(10,47),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
 
 posted_slots = set()
 posted_scenic_slots = set()
 
 def clean_text(text: str) -> str:
-    """Force proper UTF-8 safe string"""
     if not text:
         return ""
     try:
@@ -50,15 +49,19 @@ def log(msg):
     print(msg)
     try:
         if DISCORD_WEBHOOK_URL:
-            requests.post(
-                DISCORD_WEBHOOK_URL,
-                json={"content": clean_text(msg)}
-            )
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": clean_text(msg)})
     except:
         pass
 
 def generate_image(prompt):
-    return "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt)
+    # 🔥 IMPORTANT FIX: force realistic AI image style
+    final_prompt = (
+        prompt +
+        ", ultra realistic, 2050 future prediction, real architecture, "
+        "plausible urban design, natural environment, no fantasy, no impossible structures, "
+        "photorealistic, high detail"
+    )
+    return "https://image.pollinations.ai/prompt/" + urllib.parse.quote(final_prompt)
 
 def post_fb(caption, image_url):
     caption = clean_text(caption)
@@ -80,10 +83,7 @@ def gemini(prompt):
     }
 
     r = requests.post(url, json=payload)
-    r.encoding = "utf-8"
-
     text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-
     return clean_text(text)
 
 TOPICS = [
@@ -100,22 +100,21 @@ TOPICS = [
 ]
 
 SCENIC_PLACES = [
-    "Sigiriya futuristic 2050 Sri Lanka",
-    "Sri Pada future smart city",
-    "Galle Fort cyber future",
-    "Ruwanwelisaya hologram glow",
-    "Nuwara Eliya eco 2050",
-    "Yala AI wildlife reserve",
-    "Dambulla future lights",
-    "Polonnaruwa restored 2050",
-    "Horton Plains sky deck",
-    "Ella sky train bridge"
+    "Sigiriya future 2050 Sri Lanka realistic conservation site",
+    "Sri Pada eco tourism 2050 smart infrastructure",
+    "Galle Fort restored coastal protection 2050",
+    "Ruwanwelisaya heritage site modern lighting system",
+    "Nuwara Eliya climate adapted agriculture 2050",
+    "Yala wildlife reserve AI monitoring system",
+    "Dambulla cultural zone sustainable tourism 2050",
+    "Polonnaruwa archaeological preservation future tech",
+    "Horton Plains eco conservation observation deck",
+    "Ella railway smart transport bridge 2050"
 ]
 
 used = set()
 
 def safe_json(text):
-    """Extract JSON safely from Gemini response"""
     try:
         text = text.strip()
 
@@ -132,7 +131,9 @@ def generate_topic():
     prompt = (
         "Return ONLY valid JSON.\n"
         "No explanation.\n"
-        "Format: {\"caption\":\"...Sinhala...\",\"image_prompt\":\"...\"}\n"
+        "Language: Sinhala caption required.\n"
+        "Format: {\"caption\":\"...\",\"image_prompt\":\"...\"}\n"
+        "IMPORTANT: image must be realistic 2050 prediction, no fantasy.\n"
         "Topic: " + topic
     )
 
@@ -160,7 +161,9 @@ def generate_scenic():
 
     prompt = (
         "Return ONLY valid JSON.\n"
-        "{\"caption\":\"...Sinhala viral caption...\",\"image_prompt\":\"...\"}\n"
+        "Sinhala viral caption required.\n"
+        "{\"caption\":\"...\",\"image_prompt\":\"...\"}\n"
+        "IMPORTANT: image must be realistic, no sci-fi fantasy.\n"
         "Place: " + place
     )
 
