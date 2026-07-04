@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 import requests
 import json
@@ -30,17 +31,29 @@ tz = pytz.timezone("Asia/Colombo")
 def now():
     return datetime.now(tz)
 
-TIME_SLOTS = [(6,0),(8,0),(10,13),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
-SCENIC_SLOTS = [(7,0),(9,0),(10,15),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
+TIME_SLOTS = [(6,0),(8,0),(10,30),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
+SCENIC_SLOTS = [(7,0),(9,0),(10,32),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
 
 posted_slots = set()
 posted_scenic_slots = set()
+
+def clean_text(text: str) -> str:
+    """Force proper UTF-8 safe string"""
+    if not text:
+        return ""
+    try:
+        return text.encode("utf-8", "ignore").decode("utf-8")
+    except:
+        return text
 
 def log(msg):
     print(msg)
     try:
         if DISCORD_WEBHOOK_URL:
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+            requests.post(
+                DISCORD_WEBHOOK_URL,
+                json={"content": clean_text(msg)}
+            )
     except:
         pass
 
@@ -48,6 +61,8 @@ def generate_image(prompt):
     return "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt)
 
 def post_fb(caption, image_url):
+    caption = clean_text(caption)
+
     url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
     return requests.post(url, data={
         "url": image_url,
@@ -57,20 +72,31 @@ def post_fb(caption, image_url):
 
 def gemini(prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+
+    r = requests.post(url, json=payload)
+    r.encoding = "utf-8"
+
+    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+    return clean_text(text)
 
 TOPICS = [
-    "2050 à¶¯à·“ à·à·Šâ€à¶»à·“ à¶½à¶‚à¶šà·à·€à·š à¶…à¶°à·Šâ€à¶ºà·à¶´à¶±à¶º",
-    "2050 à¶¯à·“ à¶´à·Šâ€à¶»à·€à·à·„à¶±à¶º",
-    "2050 à¶¯à·“ à·ƒà·žà¶›à·Šâ€à¶ºà¶º",
-    "2050 à¶¯à·“ à¶šà·˜à·‚à·’à¶šà¶»à·Šà¶¸à¶º",
-    "2050 à¶¯à·“ à¶¶à¶½à·à¶šà·Šà¶­à·’à¶º",
-    "2050 à¶¯à·“ à·ƒà·Šà¶¸à·à¶»à·Šà¶§à·Š à¶±à¶œà¶»",
-    "2050 à¶¯à·“ à¶´à¶»à·’à·ƒà¶»à¶º",
-    "2050 à¶¯à·“ à·ƒà¶‚à¶ à·à¶»à¶š à¶šà¶»à·Šà¶¸à·à¶±à·Šà¶­à¶º",
-    "2050 à¶¯à·“ à¶­à·à¶šà·Šà·‚à¶«à¶º",
-    "2050 à¶¯à·“ à¶¢à¶± à¶¢à·“à·€à·’à¶­à¶º"
+    "2050 ශ්‍රී ලංකාවේ අධ්‍යාපනය",
+    "2050 ප්‍රවාහනය",
+    "2050 සෞඛ්‍යය",
+    "2050 කෘෂිකර්මය",
+    "2050 බලශක්තිය",
+    "2050 ස්මාර්ට් නගර",
+    "2050 පරිසරය",
+    "2050 සංචාරක කර්මාන්තය",
+    "2050 තාක්ෂණය",
+    "2050 ජන ජීවිතය"
 ]
 
 SCENIC_PLACES = [
@@ -88,26 +114,42 @@ SCENIC_PLACES = [
 
 used = set()
 
-def generate_topic():
-    topic = random.choice(TOPICS)
-    prompt = (
-        "Create viral Facebook post about Sri Lanka 2050.\n"
-        "Topic: " + topic + "\n"
-        "Return JSON with keys caption and image_prompt in Sinhala."
-    )
+def safe_json(text):
+    """Extract JSON safely from Gemini response"""
     try:
-        text = gemini(prompt)
-        if "json" in text:
-            text = text.split("json")[-1]
+        text = text.strip()
+
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+
         return json.loads(text)
     except:
-        return {
-            "caption": topic + " #SriLanka2050",
-            "image_prompt": topic
-        }
+        return None
+
+def generate_topic():
+    topic = random.choice(TOPICS)
+
+    prompt = (
+        "Return ONLY valid JSON.\n"
+        "No explanation.\n"
+        "Format: {\"caption\":\"...Sinhala...\",\"image_prompt\":\"...\"}\n"
+        "Topic: " + topic
+    )
+
+    text = gemini(prompt)
+    data = safe_json(text)
+
+    if data:
+        return data
+
+    return {
+        "caption": f"{topic} 🇱🇰 #SriLanka2050",
+        "image_prompt": topic
+    }
 
 def generate_scenic():
     global used
+
     available = [p for p in SCENIC_PLACES if p not in used]
     if not available:
         used.clear()
@@ -117,46 +159,44 @@ def generate_scenic():
     used.add(place)
 
     prompt = (
-        "Create Sri Lanka 2050 scenic post.\n"
-        "Place: " + place + "\n"
-        "Return JSON caption and image_prompt in Sinhala."
+        "Return ONLY valid JSON.\n"
+        "{\"caption\":\"...Sinhala viral caption...\",\"image_prompt\":\"...\"}\n"
+        "Place: " + place
     )
 
-    try:
-        text = gemini(prompt)
-        if "json" in text:
-            text = text.split("json")[-1]
-        return json.loads(text)
-    except:
-        return {
-            "caption": place + " #SriLanka2050",
-            "image_prompt": place
-        }
+    text = gemini(prompt)
+    data = safe_json(text)
+
+    if data:
+        return data
+
+    return {
+        "caption": f"{place} 🇱🇰 #SriLanka2050",
+        "image_prompt": place
+    }
 
 def scheduler():
     global posted_slots, posted_scenic_slots
 
     while True:
         try:
-            for i,(h,m) in enumerate(TIME_SLOTS):
-                if i in posted_slots:
-                    continue
-                t = now()
-                if t.hour == h and abs(t.minute - m) <= 1:
-                    data = generate_topic()
-                    img = generate_image(data["image_prompt"])
-                    post_fb(data["caption"], img)
-                    posted_slots.add(i)
+            for i, (h, m) in enumerate(TIME_SLOTS):
+                if i not in posted_slots:
+                    t = now()
+                    if t.hour == h and abs(t.minute - m) <= 1:
+                        data = generate_topic()
+                        img = generate_image(data["image_prompt"])
+                        post_fb(data["caption"], img)
+                        posted_slots.add(i)
 
-            for i,(h,m) in enumerate(SCENIC_SLOTS):
-                if i in posted_scenic_slots:
-                    continue
-                t = now()
-                if t.hour == h and abs(t.minute - m) <= 1:
-                    data = generate_scenic()
-                    img = generate_image(data["image_prompt"])
-                    post_fb(data["caption"], img)
-                    posted_scenic_slots.add(i)
+            for i, (h, m) in enumerate(SCENIC_SLOTS):
+                if i not in posted_scenic_slots:
+                    t = now()
+                    if t.hour == h and abs(t.minute - m) <= 1:
+                        data = generate_scenic()
+                        img = generate_image(data["image_prompt"])
+                        post_fb(data["caption"], img)
+                        posted_scenic_slots.add(i)
 
             time.sleep(20)
 
