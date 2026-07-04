@@ -17,7 +17,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # ================= MONETIZATION SETTINGS =================
-MONETIZATION_MODE = "affiliate"
+MONETIZATION_MODE = "off"
 
 AFFILIATE_LINKS = [
     "https://your-affiliate-link-1.com",
@@ -53,7 +53,7 @@ def reset_time():
     return t.hour == 0 and t.minute < 5
 
 # ================= TIME SLOTS =================
-TIME_SLOTS = [(6,36),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
+TIME_SLOTS = [(6,0),(8,0),(10,0),(12,0),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
 SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
 CARTOON_SLOTS = [(7,15),(12,15),(13,26),(16,30),(19,30)]
 
@@ -90,7 +90,7 @@ Rules:
 - Unique artistic style — not generic stock photo
 
 Return ONLY JSON:
-{{"caption":"...", "image_prompt":"..."}}
+{{"caption":"...","image_prompt":"..."}}
 """
 
         r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
@@ -345,13 +345,10 @@ def scenic_generate():
     place = random.choice(available)
     scenic_used_today.add(place)
 
-    # ====== IMPROVED IMAGE PROMPT — cinematic, hyper-detailed, 8k style ======
     image_prompt = (
         f"A charming, picturesque, hyper-detailed photograph of {place}. "
-        f"Ultra-realistic, cinematic lighting, 8k resolution, photorealistic, "
-        f"majestic scenery, clear blue sky with soft white clouds, "
-        f"reflections on water, lush green landscape, highly detailed, "
-        f"award-winning travel photography, breathtaking panoramic view."
+        f"Clear blue water reflecting the sky, fluffy white clouds. "
+        f"8k resolution, cinematic lighting."
     )
 
     return {
