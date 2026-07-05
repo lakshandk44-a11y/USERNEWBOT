@@ -294,7 +294,7 @@ Return JSON:
             "image_prompt": "editorial cartoon"
         }
 
-# ================= SCENIC DAILY AI SYSTEM (UPDATED PROMPT) =================
+# ================= SCENIC DAILY AI SYSTEM =================
 def get_daily_scenic_pool():
     global scenic_daily_places, scenic_last_date
 
@@ -311,6 +311,8 @@ Rules:
 - Must be real-world places
 - Must be highly photogenic
 - Must be different from common repeats
+- Do NOT repeat places from previous days
+- Each place must be unique and from different countries/regions
 
 Return ONLY JSON array:
 ["place1","place2",...]
@@ -345,20 +347,43 @@ def scenic_generate():
     place = random.choice(available)
     scenic_used_today.add(place)
 
-    image_prompt = (
-        f"An enchanting, award-winning, hyper-realistic drone perspective photograph of {place}, "
-        f"capturing a deeply nested, vast river valley set between towering, massive, multi-layered red and orange rock peaks. "
-        f"The scene is exactly like image_2.png and image_1.png combined, but with enhanced ultra-high resolution and clarity. "
-        f"A winding, glacial-turquoise Colorado River flows prominently through the rugged scenery, featuring crystal-clear water "
-        f"with flawlessly detailed reflections of dramatic, massive, multi-tiered cotton-white clouds. "
-        f"The composition is a precise blend of image_1.png's aerial village logic and image_2.png's detailed chalet-style structures "
-        f"(imagined as a tourist lodge village), deeply embedded along the riverbanks with a clear church steeple and intricate network of stone paths. "
-        f"32k resolution, extreme sharpness, no filter, natural film grain. "
-        f"Shot on a Phase One IQ4 camera with a 35mm lens, f/11, 1/160s, ISO 100. "
-        f"Cinematic, golden hour lighting with long, defined shadows, volumetric haze, and extreme macro and micro-detail across all rock textures, foliage, and structures. "
-        f"Fujifilm Velvia film simulation applied for rich, natural color. "
-        f"A flawlessly pristine, highly photorealistic masterpiece."
-    )
+    # AI එකෙන් place එක අනුව unique, high-quality image prompt එකක් ගන්නවා
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+        prompt_text = f"""
+Generate a SINGLE, detailed, high-quality image prompt for generating a stunning photo of this specific place.
+
+Place: {place}
+
+Rules:
+- Must be hyper-realistic, ultra-HD, cinematic quality
+- Describe the unique natural beauty, colors, lighting, and atmosphere specific to {place}
+- Include camera details: 32k resolution, extreme sharpness, natural film grain, Phase One IQ4 camera, 35mm lens, f/11, 1/160s, ISO 100
+- Cinematic golden hour lighting with long shadows, volumetric haze, extreme macro and micro-detail
+- Fujifilm Velvia film simulation for rich natural color
+- Do NOT mention any other place names — only describe {place}
+- Make it unique and fitting for {place} — not generic
+
+Return ONLY a single string (no JSON, no markdown, just the prompt text):
+"""
+        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt_text}]}]})
+        image_prompt = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        if "```" in image_prompt:
+            image_prompt = image_prompt.split("```")[0].strip()
+
+    except:
+        # Fallback prompt if API fails
+        image_prompt = (
+            f"A hyper-realistic, award-winning photograph of {place}. "
+            f"Ultra-HD, 32k resolution, extreme sharpness, natural film grain. "
+            f"Shot on a Phase One IQ4 camera with a 35mm lens, f/11, 1/160s, ISO 100. "
+            f"Cinematic golden hour lighting with long shadows, volumetric haze, "
+            f"extreme macro and micro-detail across all textures. "
+            f"Fujifilm Velvia film simulation for rich natural color. "
+            f"A flawlessly pristine, highly photorealistic masterpiece."
+        )
 
     return {
         "caption": f"""✨ {place}
