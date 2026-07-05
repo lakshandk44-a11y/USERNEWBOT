@@ -60,7 +60,8 @@ CARTOON_SLOTS = [(7,15),(12,15),(13,26),(16,30),(19,30)]
 posted_slots = set()
 posted_scenic_slots = set()
 posted_cartoon_slots = set()
-seen_news = set()
+seen_news_regular = set()
+seen_news_cartoon = set()
 
 # ================= HOLIDAY CONFIG =================
 HOLIDAYS = {
@@ -347,7 +348,6 @@ def scenic_generate():
     place = random.choice(available)
     scenic_used_today.add(place)
 
-    # AI එකෙන් place එක අනුව unique, high-quality image prompt එකක් ගන්නවා
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
@@ -374,7 +374,6 @@ Return ONLY a single string (no JSON, no markdown, just the prompt text):
             image_prompt = image_prompt.split("```")[0].strip()
 
     except:
-        # Fallback prompt if API fails
         image_prompt = (
             f"A hyper-realistic, award-winning photograph of {place}. "
             f"Ultra-HD, 32k resolution, extreme sharpness, natural film grain. "
@@ -411,7 +410,7 @@ def post_fb(caption, image_url):
 
 # ================= SCHEDULER =================
 def scheduler():
-    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news, holiday_posted_today
+    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news_regular, seen_news_cartoon, holiday_posted_today
 
     while True:
         try:
@@ -419,7 +418,8 @@ def scheduler():
                 posted_slots=set()
                 posted_scenic_slots=set()
                 posted_cartoon_slots=set()
-                seen_news=set()
+                seen_news_regular=set()
+                seen_news_cartoon=set()
                 holiday_posted_today = False
 
             # ===== AUTO REPLY TO COMMENTS =====
@@ -442,43 +442,63 @@ def scheduler():
                 if i in posted_slots:
                     continue
                 t = now()
-                if t.hour == h and abs(t.minute - m) <= 1:
+                if t.hour == h and t.minute == m:
                     random.shuffle(news_list)
+                    posted = False
                     for news in news_list:
-                        if news["title"] in seen_news:
-                            continue
-                        seen_news.add(news["title"])
+                        if news["title"] not in seen_news_regular:
+                            seen_news_regular.add(news["title"])
+                            ai = ai_generate(news["title"], news["desc"])
+                            img = generate_image(ai["image_prompt"])
+                            result = post_fb(ai["caption"], img)
+                            if "id" in result:
+                                posted_slots.add(i)
+                                posted = True
+                            break
+                    if not posted and news_list:
+                        news = random.choice(news_list)
                         ai = ai_generate(news["title"], news["desc"])
                         img = generate_image(ai["image_prompt"])
-                        post_fb(ai["caption"], img)
-                        posted_slots.add(i)
-                        break
+                        result = post_fb(ai["caption"], img)
+                        if "id" in result:
+                            posted_slots.add(i)
 
+            # ===== SCENIC POSTS =====
             for i,(h,m) in enumerate(SCENIC_SLOTS):
                 if i in posted_scenic_slots:
                     continue
                 t = now()
-                if t.hour == h and abs(t.minute - m) <= 1:
+                if t.hour == h and t.minute == m:
                     ai = scenic_generate()
                     img = generate_image(ai["image_prompt"])
                     post_fb(ai["caption"], img)
                     posted_scenic_slots.add(i)
 
+            # ===== CARTOON POSTS =====
             for i,(h,m) in enumerate(CARTOON_SLOTS):
                 if i in posted_cartoon_slots:
                     continue
                 t = now()
-                if t.hour == h and abs(t.minute - m) <= 1:
+                if t.hour == h and t.minute == m:
                     random.shuffle(news_list)
+                    posted = False
                     for news in news_list:
-                        if news["title"] in seen_news:
-                            continue
-                        seen_news.add(news["title"])
+                        if news["title"] not in seen_news_cartoon:
+                            seen_news_cartoon.add(news["title"])
+                            ai = cartoon_generate(news["title"], news["desc"])
+                            img = generate_image(ai["image_prompt"])
+                            result = post_fb(ai["caption"], img)
+                            if "id" in result:
+                                posted_cartoon_slots.add(i)
+                                posted = True
+                            break
+                    if not posted and news_list:
+                        news = random.choice(news_list)
                         ai = cartoon_generate(news["title"], news["desc"])
                         img = generate_image(ai["image_prompt"])
-                        post_fb(ai["caption"], img)
-                        posted_cartoon_slots.add(i)
-                        break
+                        result = post_fb(ai["caption"], img)
+                        if "id" in result:
+                            posted_cartoon_slots.add(i)
 
             time.sleep(20)
 
