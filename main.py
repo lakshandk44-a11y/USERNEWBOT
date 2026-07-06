@@ -162,19 +162,7 @@ def process_auto_replies():
 scenic_daily_places = []
 scenic_used_today = set()
 scenic_last_date = None
-
-SCENIC_PLACES = [
-    "Grand Canyon, USA",
-    "Yellowstone National Park",
-    "Yosemite National Park",
-    "Golden Gate Bridge, San Francisco",
-    "New York City skyline at night",
-    "Hawaii tropical beach sunset",
-    "Alaska snowy mountains landscape",
-    "Antelope Canyon glowing light beams",
-    "Route 66 desert road cinematic view",
-    "Chicago skyline reflections on river"
-]
+scenic_posted_places_today = set()  # Track place names already posted today
 
 # ================= LOG =================
 def log(msg):
@@ -295,7 +283,7 @@ Return JSON:
             "image_prompt": "editorial cartoon"
         }
 
-# ================= SCENIC DAILY AI SYSTEM =================
+# ================= SCENIC DAILY AI SYSTEM (UPGRADED) =================
 def get_daily_scenic_pool():
     global scenic_daily_places, scenic_last_date
 
@@ -309,14 +297,15 @@ def get_daily_scenic_pool():
 Generate 10 UNIQUE viral scenic travel destinations for today.
 
 Rules:
-- Must be real-world places
-- Must be highly photogenic
-- Must be different from common repeats
-- Do NOT repeat places from previous days
-- Each place must be unique and from different countries/regions
+- Must be real-world places from AROUND THE WORLD
+- Must be highly photogenic and breathtaking
+- Must be diverse — different countries, continents, and types (mountains, beaches, cities, forests, deserts, waterfalls, historical sites, etc.)
+- Do NOT repeat places that were suggested on previous days
+- Each place must be uniquely beautiful and iconic in its own way
+- Include the country name for each place
 
 Return ONLY JSON array:
-["place1","place2",...]
+["Place Name, Country", "Place Name, Country", ...]
 """
 
             r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
@@ -328,70 +317,113 @@ Return ONLY JSON array:
             scenic_daily_places = json.loads(text)
             scenic_last_date = today
             scenic_used_today.clear()
+            scenic_posted_places_today.clear()
 
         except:
-            scenic_daily_places = random.sample(SCENIC_PLACES, 10)
+            scenic_daily_places = [
+                "Santorini, Greece",
+                "Banff National Park, Canada",
+                "Maldives Beach",
+                "Northern Lights, Iceland",
+                "Mount Fuji, Japan",
+                "Plitvice Lakes, Croatia",
+                "Marble Caves, Chile",
+                "Bora Bora, French Polynesia",
+                "Taj Mahal, India",
+                "Milford Sound, New Zealand"
+            ]
             scenic_last_date = today
             scenic_used_today.clear()
+            scenic_posted_places_today.clear()
 
     return scenic_daily_places
 
 def scenic_generate():
     pool = get_daily_scenic_pool()
 
-    available = [p for p in pool if p not in scenic_used_today]
+    # Get places not yet posted today
+    available = [p for p in pool if p not in scenic_posted_places_today]
 
+    # If all places used today, clear and restart
     if not available:
-        scenic_used_today.clear()
+        scenic_posted_places_today.clear()
         available = pool
 
+    # Pick a random available place
     place = random.choice(available)
-    scenic_used_today.add(place)
+    scenic_posted_places_today.add(place)
 
     try:
+        # STEP 1: Generate the absolute highest quality image prompt for this specific place
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         prompt_text = f"""
-Generate a SINGLE, detailed, high-quality image prompt for generating a stunning photo of this specific place.
+Generate a SINGLE, EXTREMELY DETAILED, ULTRA-HIGH-QUALITY image prompt for generating a stunning hyper-realistic photograph of this specific destination.
 
-Place: {place}
+Destination: {place}
 
-Rules:
-- Must be hyper-realistic, ultra-HD, cinematic quality
-- Describe the unique natural beauty, colors, lighting, and atmosphere specific to {place}
-- Include camera details: 32k resolution, extreme sharpness, natural film grain, Phase One IQ4 camera, 35mm lens, f/11, 1/160s, ISO 100
-- Cinematic golden hour lighting with long shadows, volumetric haze, extreme macro and micro-detail
-- Fujifilm Velvia film simulation for rich natural color
-- Do NOT mention any other place names — only describe {place}
-- Make it unique and fitting for {place} — not generic
+CRITICAL RULES (follow ALL strictly):
+- Must be the absolute HIGHEST QUALITY image prompt possible — describe EVERY visual detail
+- Hyper-realistic, ultra-HD, cinematic quality, award-winning National Geographic style photography
+- Describe the unique natural beauty, colors, lighting, atmosphere, textures, and mood specific to {place}
+- Include professional camera metadata: 32k resolution, extreme sharpness, natural film grain, Phase One IQ4 150MP camera, 35mm prime lens at f/11, 1/160s shutter, ISO 100
+- Cinematic golden hour lighting (or blue hour if that fits better) with long dramatic shadows, volumetric haze, god rays where applicable
+- Photographed in stunning natural light that best captures the essence of {place}
+- Fujifilm Velvia film simulation for rich, vibrant, natural colors
+- Professional color grading, master-level composition, rule of thirds
+- Include specific weather/seasonal conditions that make {place} look its absolute best
+- Do NOT mention any other place names — ONLY describe {place}
+- Make it UNIQUE to {place} — not a generic description that could fit anywhere
+- End with: "A flawless, pristine, highly photorealistic masterpiece with breathtaking detail"
 
-Return ONLY a single string (no JSON, no markdown, just the prompt text):
+Return ONLY a single plain text string (NO JSON, NO markdown formatting, NO code blocks — just the prompt text):
 """
+
         r = requests.post(url, json={"contents":[{"parts":[{"text":prompt_text}]}]})
         image_prompt = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
         if "```" in image_prompt:
             image_prompt = image_prompt.split("```")[0].strip()
 
+        # STEP 2: Generate a place-specific caption
+        caption_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+        caption_prompt = f"""
+Create a short, viral, engaging Facebook caption for this travel destination.
+
+Destination: {place}
+
+Rules:
+- 3-4 lines maximum
+- Include a sense of wonder and adventure
+- Ask an engaging question at the end
+- Include relevant hashtags (4-5 max)
+- Make it feel unique to {place} — not generic
+
+Return ONLY the caption text (no JSON, no markdown):
+"""
+
+        r2 = requests.post(caption_url, json={"contents":[{"parts":[{"text":caption_prompt}]}]})
+        caption_text = r2.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        if "```" in caption_text:
+            caption_text = caption_text.split("```")[0].strip()
+
     except:
         image_prompt = (
-            f"A hyper-realistic, award-winning photograph of {place}. "
+            f"A hyper-realistic, award-winning National Geographic photograph of {place}. "
             f"Ultra-HD, 32k resolution, extreme sharpness, natural film grain. "
-            f"Shot on a Phase One IQ4 camera with a 35mm lens, f/11, 1/160s, ISO 100. "
-            f"Cinematic golden hour lighting with long shadows, volumetric haze, "
-            f"extreme macro and micro-detail across all textures. "
-            f"Fujifilm Velvia film simulation for rich natural color. "
-            f"A flawlessly pristine, highly photorealistic masterpiece."
+            f"Shot on a Phase One IQ4 150MP camera with a 35mm prime lens at f/11, 1/160s, ISO 100. "
+            f"Cinematic golden hour lighting with long dramatic shadows, volumetric haze. "
+            f"Fujifilm Velvia film simulation for rich vibrant natural colors. "
+            f"Professional color grading, master-level composition. "
+            f"Breathtaking detail in every element. "
+            f"A flawless, pristine, highly photorealistic masterpiece."
         )
+        caption_text = f"✨ {place}\n\n🌍 Nature's masterpiece awaits.\n\nHave you ever dreamed of visiting here?"
 
     return {
-        "caption": f"""✨ {place}
-
-🌍 Experience the beauty of this breathtaking destination.
-
-🔥 Travel inspiration for your bucket list!
-
-#Travel #Nature #Wanderlust #Explore #Scenic #BeautifulPlaces #TravelGram""",
+        "caption": caption_text,
         "image_prompt": image_prompt
     }
 
