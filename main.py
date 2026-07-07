@@ -99,8 +99,14 @@ Return ONLY JSON:
 
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
 
-        result = json.loads(text)
+        result = json.loads(text.strip())
         return result
     except:
         return {
@@ -160,9 +166,12 @@ def process_auto_replies():
 
 # ================= SCENIC DAILY SYSTEM =================
 scenic_daily_places = []
-scenic_used_today = set()
 scenic_last_date = None
-scenic_posted_places_today = set()  # Track place names already posted today
+scenic_posted_places_today = set()
+
+# ================= NEWS CACHE =================
+news_cache = []
+news_last_fetch = 0
 
 # ================= LOG =================
 def log(msg):
@@ -190,13 +199,17 @@ def apply_monetization(text):
 
 # ================= NEWS =================
 def get_news():
+    global news_cache, news_last_fetch
     try:
-        feed = feedparser.parse(
-            "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"
-        )
-        return [{"title":e.title,"desc":getattr(e,"summary",e.title)} for e in feed.entries[:20]]
+        if time.time() - news_last_fetch > 300:
+            feed = feedparser.parse(
+                "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"
+            )
+            news_cache = [{"title":e.title,"desc":getattr(e,"summary",e.title)} for e in feed.entries[:20]]
+            news_last_fetch = time.time()
+        return news_cache
     except:
-        return []
+        return news_cache if news_cache else []
 
 # ================= AI NEWS =================
 def ai_generate(title, desc):
@@ -219,8 +232,14 @@ Return:
 
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
 
-        result = json.loads(text)
+        result = json.loads(text.strip())
         result["caption"] = apply_monetization(result["caption"])
         return result
 
@@ -229,17 +248,6 @@ Return:
             "caption": apply_monetization("News Update"),
             "image_prompt": "news illustration"
         }
-
-# ================= VIRAL CAPTION =================
-def make_viral_caption(text):
-    hooks = ["🚨 BREAKING:", "😱 SHOCKING:", "🔥 JUST IN:", "⚠️ ALERT:"]
-    suffix = [
-        "People are reacting strongly!",
-        "This is going viral right now!",
-        "You won't believe this!",
-        "What is your opinion?"
-    ]
-    return f"{random.choice(hooks)} {text}\n\n{random.choice(suffix)}"
 
 # ================= CARTOON =================
 def cartoon_generate(title, desc):
@@ -262,8 +270,14 @@ Return JSON:
 
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
 
-        result = json.loads(text)
+        result = json.loads(text.strip())
 
         caption = f"""🖼 {result["caption"]}
 
@@ -313,10 +327,15 @@ Return ONLY JSON array:
 
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            start = text.find('[')
+            end = text.rfind(']')
+            if start != -1 and end != -1:
+                text = text[start:end+1]
 
-            scenic_daily_places = json.loads(text)
+            scenic_daily_places = json.loads(text.strip())
             scenic_last_date = today
-            scenic_used_today.clear()
             scenic_posted_places_today.clear()
 
         except:
@@ -333,7 +352,6 @@ Return ONLY JSON array:
                 "Milford Sound, New Zealand"
             ]
             scenic_last_date = today
-            scenic_used_today.clear()
             scenic_posted_places_today.clear()
 
     return scenic_daily_places
@@ -341,20 +359,16 @@ Return ONLY JSON array:
 def scenic_generate():
     pool = get_daily_scenic_pool()
 
-    # Get places not yet posted today
     available = [p for p in pool if p not in scenic_posted_places_today]
 
-    # If all places used today, clear and restart
     if not available:
         scenic_posted_places_today.clear()
         available = pool
 
-    # Pick a random available place
     place = random.choice(available)
     scenic_posted_places_today.add(place)
 
     try:
-        # STEP 1: Generate the absolute highest quality image prompt for this specific place
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         prompt_text = f"""
@@ -385,7 +399,6 @@ Return ONLY a single plain text string (NO JSON, NO markdown formatting, NO code
         if "```" in image_prompt:
             image_prompt = image_prompt.split("```")[0].strip()
 
-        # STEP 2: Generate a place-specific caption
         caption_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         caption_prompt = f"""
@@ -442,7 +455,7 @@ def post_fb(caption, image_url):
 
 # ================= SCHEDULER =================
 def scheduler():
-    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news_regular, seen_news_cartoon, holiday_posted_today
+    global posted_slots, posted_scenic_slots, posted_cartoon_slots, seen_news_regular, seen_news_cartoon, holiday_posted_today, last_replied_comment_ids
 
     while True:
         try:
@@ -453,6 +466,7 @@ def scheduler():
                 seen_news_regular=set()
                 seen_news_cartoon=set()
                 holiday_posted_today = False
+                last_replied_comment_ids=set()
 
             # ===== AUTO REPLY TO COMMENTS =====
             process_auto_replies()
@@ -503,8 +517,9 @@ def scheduler():
                 if t.hour == h and t.minute == m:
                     ai = scenic_generate()
                     img = generate_image(ai["image_prompt"])
-                    post_fb(ai["caption"], img)
-                    posted_scenic_slots.add(i)
+                    result = post_fb(ai["caption"], img)
+                    if "id" in result:
+                        posted_scenic_slots.add(i)
 
             # ===== CARTOON POSTS =====
             for i,(h,m) in enumerate(CARTOON_SLOTS):
