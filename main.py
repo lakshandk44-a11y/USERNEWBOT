@@ -213,10 +213,11 @@ def get_news():
 
 # ================= AI NEWS =================
 def ai_generate(title, desc):
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    for attempt in range(3):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-        prompt = f"""
+            prompt = f"""
 Create viral Facebook caption + image prompt JSON.
 
 NEWS:
@@ -227,34 +228,38 @@ Return:
 {{"caption":"...","image_prompt":"..."}}
 """
 
-        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
-        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1:
-            text = text[start:end+1]
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1:
+                text = text[start:end+1]
 
-        result = json.loads(text.strip())
-        result["caption"] = apply_monetization(result["caption"])
-        return result
+            result = json.loads(text.strip())
+            result["caption"] = apply_monetization(result["caption"])
+            return result
 
-    except:
-        return {
-            "caption": apply_monetization("News Update"),
-            "image_prompt": "news illustration"
-        }
+        except Exception as e:
+            log(f"ai_generate attempt {attempt+1} failed: {str(e)}")
+            time.sleep(3)
+
+    return {
+        "caption": apply_monetization("News Update"),
+        "image_prompt": "news illustration"
+    }
 
 # ================= CARTOON =================
 def cartoon_generate(title, desc):
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    for attempt in range(3):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-        prompt = f"""
+            prompt = f"""
 Editorial cartoon news illustration.
 
 NEWS:
@@ -265,21 +270,21 @@ Return JSON:
 {{"caption":"...","image_prompt":"..."}}
 """
 
-        r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
-        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            r = requests.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1:
-            text = text[start:end+1]
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1:
+                text = text[start:end+1]
 
-        result = json.loads(text.strip())
+            result = json.loads(text.strip())
 
-        caption = f"""🖼 {result["caption"]}
+            caption = f"""🖼 {result["caption"]}
 
 📌 {title}
 
@@ -288,14 +293,17 @@ Return JSON:
 #BreakingNews #Cartoon #Viral #Trending
 """
 
-        result["caption"] = apply_monetization(caption.strip())
-        return result
+            result["caption"] = apply_monetization(caption.strip())
+            return result
 
-    except:
-        return {
-            "caption": apply_monetization("News Update"),
-            "image_prompt": "editorial cartoon"
-        }
+        except Exception as e:
+            log(f"cartoon_generate attempt {attempt+1} failed: {str(e)}")
+            time.sleep(3)
+
+    return {
+        "caption": apply_monetization("News Update"),
+        "image_prompt": "editorial cartoon"
+    }
 
 # ================= SCENIC DAILY AI SYSTEM (UPGRADED) =================
 def get_daily_scenic_pool():
