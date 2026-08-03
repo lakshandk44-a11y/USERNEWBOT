@@ -30,7 +30,18 @@ except ImportError:
 FB_PAGE_ID = os.getenv("FB_PAGE_ID")
 FB_ACCESS_TOKEN = os.getenv("FB_ACCESS_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+# NEW: Telegram notifications (replaces the old Discord webhook logger).
+# Defaults are set to the bot/chat you gave me, but can still be overridden
+# via env vars on Railway/VPS without touching code.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# SECURITY NOTE: the real token/chat id used to be hardcoded here as fallback
+# values. That means anyone who ever saw this file (a repo, a support chat, a
+# screenshot) could message-spam your bot or read your notifications. Put the
+# real values ONLY in your .env file / VPS environment variables, never in code.
+# If this token was ever shared anywhere, revoke it via @BotFather (/revoke)
+# and generate a new one, then update .env.
 
 # NEW: optional Instagram cross-posting - only activates if both are set.
 # Leave unset and the bot behaves exactly as before (Facebook-only).
@@ -85,6 +96,8 @@ def load_state():
     global holiday_posted_today, last_replied_comment_ids
     global scenic_daily_places, scenic_last_date, scenic_posted_places_today
     global daily_posted_posts, daily_summary_posted, weekly_history, weekly_summary_posted_on
+    global telegram_update_offset
+    global CATEGORY_ENABLED
 
     if not os.path.exists(STATE_FILE):
         return
@@ -115,6 +128,12 @@ def load_state():
         daily_summary_posted = s.get("daily_summary_posted", False)
         weekly_history = s.get("weekly_history", [])
         weekly_summary_posted_on = s.get("weekly_summary_posted_on")
+        telegram_update_offset = s.get("telegram_update_offset", 0)
+
+        saved_categories = s.get("category_enabled")
+        if saved_categories:
+            for k in CATEGORY_ENABLED:
+                CATEGORY_ENABLED[k] = saved_categories.get(k, CATEGORY_ENABLED[k])
 
         log("♻️ Restored bot state from previous run.")
     except Exception as e:
@@ -146,6 +165,8 @@ def save_state():
             "daily_summary_posted": daily_summary_posted,
             "weekly_history": weekly_history,
             "weekly_summary_posted_on": weekly_summary_posted_on,
+            "telegram_update_offset": telegram_update_offset,
+            "category_enabled": CATEGORY_ENABLED,
         }
         with open(STATE_FILE, "w") as f:
             json.dump(s, f)
@@ -212,6 +233,108 @@ def home():
     return "Bot Running"
 
 
+# ================= POST ANALYSIS DASHBOARD (NEW) =================
+# A read-only web page at /dashboard showing today's posts (with live
+# likes/comments/shares pulled from the Graph API) plus the rolling 7-day
+# history that daily_summary()/weekly_summary() already build. This only
+# READS existing analytics state (daily_posted_posts / weekly_history) - it
+# does not change posting logic, scheduling, or any existing route/behavior.
+@app.route("/dashboard")
+def dashboard():
+    rows_html = ""
+    by_type_today = {}
+    for p in daily_posted_posts:
+        by_type_today[p["type"]] = by_type_today.get(p["type"], 0) + 1
+        eng = get_post_engagement(p["id"]) or {}
+        try:
+            t_disp = datetime.fromisoformat(p["time"]).strftime("%H:%M:%S")
+        except Exception:
+            t_disp = p["time"]
+        rows_html += f"""
+        <tr>
+            <td>{t_disp}</td>
+            <td><span class="badge">{p['type']}</span></td>
+            <td><a href="https://facebook.com/{p['id']}" target="_blank">{p['id']}</a></td>
+            <td>👍 {eng.get('likes', '-')}</td>
+            <td>💬 {eng.get('comments', '-')}</td>
+            <td>🔁 {eng.get('shares', '-')}</td>
+        </tr>"""
+
+    if not rows_html:
+        rows_html = '<tr><td colspan="6" class="empty">No posts yet today.</td></tr>'
+
+    type_badges_html = "".join(
+        f'<div class="stat"><div class="stat-num">{c}</div><div class="stat-label">{t}</div></div>'
+        for t, c in by_type_today.items()
+    ) or '<div class="empty">Nothing posted yet today.</div>'
+
+    weekly_rows_html = ""
+    for d in reversed(weekly_history):
+        by_type_str = ", ".join(f"{t}: {c}" for t, c in d.get("by_type", {}).items()) or "-"
+        weekly_rows_html += f"""
+        <tr>
+            <td>{d.get('date', '-')}</td>
+            <td>{d.get('total', 0)}</td>
+            <td>{by_type_str}</td>
+            <td>{d.get('best_type') or '-'}</td>
+        </tr>"""
+    if not weekly_rows_html:
+        weekly_rows_html = '<tr><td colspan="4" class="empty">No weekly history yet.</td></tr>'
+
+    total_today = len(daily_posted_posts)
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="refresh" content="60">
+        <title>Post Analysis Dashboard</title>
+        <style>
+            body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+                    background: #0f1115; color: #e6e8eb; margin: 0; padding: 24px; }}
+            h1 {{ font-size: 20px; margin-bottom: 4px; }}
+            .sub {{ color: #9aa0a6; font-size: 13px; margin-bottom: 24px; }}
+            .stats-row {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }}
+            .stat {{ background: #1a1d24; border: 1px solid #2a2e37; border-radius: 10px;
+                     padding: 14px 20px; min-width: 90px; text-align: center; }}
+            .stat-num {{ font-size: 22px; font-weight: 700; color: #4da3ff; }}
+            .stat-label {{ font-size: 12px; color: #9aa0a6; margin-top: 4px; text-transform: capitalize; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 32px;
+                     background: #1a1d24; border-radius: 10px; overflow: hidden; }}
+            th {{ text-align: left; background: #22262f; color: #9aa0a6; font-size: 12px;
+                  padding: 10px 12px; text-transform: uppercase; }}
+            td {{ padding: 10px 12px; border-top: 1px solid #2a2e37; font-size: 13px; }}
+            a {{ color: #4da3ff; text-decoration: none; }}
+            .badge {{ background: #2a2e37; padding: 2px 8px; border-radius: 999px; font-size: 12px; }}
+            .empty {{ color: #6b7078; text-align: center; padding: 16px; }}
+            h2 {{ font-size: 15px; color: #cfd3d8; margin: 0 0 12px; }}
+        </style>
+    </head>
+    <body>
+        <h1>📊 Post Analysis Dashboard</h1>
+        <div class="sub">Auto-refreshes every 60s · Today: {now().strftime('%Y-%m-%d')} · Total posts today: {total_today}</div>
+
+        <h2>Today by type</h2>
+        <div class="stats-row">{type_badges_html}</div>
+
+        <h2>Today's posts</h2>
+        <table>
+            <tr><th>Time</th><th>Type</th><th>Post ID</th><th>Likes</th><th>Comments</th><th>Shares</th></tr>
+            {rows_html}
+        </table>
+
+        <h2>Last 7 days</h2>
+        <table>
+            <tr><th>Date</th><th>Total</th><th>By type</th><th>Best type</th></tr>
+            {weekly_rows_html}
+        </table>
+    </body>
+    </html>
+    """
+    return html
+
+
 def run_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -231,19 +354,51 @@ def reset_time():
 
 
 # ================= TIME SLOTS =================
-TIME_SLOTS = [(6, 0), (8, 0), (10, 0), (11, 42), (14, 0), (16, 0), (18, 0), (20, 0), (22, 0), (23, 30)]
-SCENIC_SLOTS = [(7, 0), (9, 0), (11, 0), (13, 0), (15, 15), (17, 0), (19, 0), (21, 0), (22, 30), (23, 45)]
-CARTOON_SLOTS = [(7, 15), (12, 15), (13, 26), (16, 30), (19, 30)]
-
-# NEW: two extra content types in their own slots, so nothing existing shifts or gets crowded out.
-QUOTE_SLOTS = [(9, 45), (20, 45)]
-FACT_SLOTS = [(12, 45), (18, 45)]
+# FIX (root cause of "0 likes / 0 reach"): this used to fire 10+10+5+2+2 = 29
+# posts EVERY SINGLE DAY from one Page. That volume is way past what a normal
+# page posts, and it's exactly the pattern Facebook's spam/"inauthentic
+# behavior" systems look for from API-posting bots - once flagged, the Page's
+# organic reach gets throttled toward ~0 regardless of how good the content
+# is, which matches what you're seeing (posts look fine, zero views/likes).
+# Cut down to ~9 posts/day total, spread out, so posting behavior looks like
+# a normal page instead of a bot. Old values kept below (commented) in case
+# you want to revert or re-tune later.
+# OLD: TIME_SLOTS = [(6,0),(8,0),(10,0),(11,42),(14,0),(16,0),(18,0),(20,0),(22,0),(23,30)]
+# OLD: SCENIC_SLOTS = [(7,0),(9,0),(11,0),(13,0),(15,15),(17,0),(19,0),(21,0),(22,30),(23,45)]
+# OLD: CARTOON_SLOTS = [(7,15),(12,15),(13,26),(16,30),(19,30)]
+# OLD: QUOTE_SLOTS = [(9,45),(20,45)]
+# OLD: FACT_SLOTS = [(12,45),(18,45)]
+TIME_SLOTS = [(8, 0), (13, 0), (18, 0), (21, 0)]
+SCENIC_SLOTS = [(10, 30), (16, 0)]
+CARTOON_SLOTS = [(14, 30)]
+QUOTE_SLOTS = [(9, 0)]
+FACT_SLOTS = [(19, 30)]
 
 posted_slots = set()
 posted_scenic_slots = set()
 posted_cartoon_slots = set()
 posted_quote_slots = set()   # NEW
 posted_fact_slots = set()    # NEW
+
+# ================= CATEGORY ON/OFF TOGGLES (NEW) =================
+# Lets you turn each of the 5 post categories on/off from Telegram (buttons),
+# without touching anything else - slot times, content generation, and
+# posting logic all stay exactly the same. Persisted in bot_state.json so a
+# restart remembers your choice.
+CATEGORY_ENABLED = {
+    "news": True,
+    "scenic": True,
+    "cartoon": True,
+    "quote": True,
+    "fact": True,
+}
+CATEGORY_LABELS = {
+    "news": "📰 News",
+    "scenic": "🏞️ Scenic",
+    "cartoon": "🎨 Cartoon",
+    "quote": "💬 Quote",
+    "fact": "🧠 Fact",
+}
 
 seen_news_regular = set()
 seen_news_cartoon = set()
@@ -281,6 +436,254 @@ weekly_history = []           # NEW: [{"date":..., "total":..., "by_type":{...}}
 weekly_summary_posted_on = None  # NEW: date string of last weekly digest, to avoid double-posting
 
 
+# ================= TELEGRAM NOTIFICATIONS (NEW - replaces Discord) =================
+# Sends every log() message to your Telegram DM instead of a Discord webhook.
+# Nicely formatted: a status emoji + bold category line + timestamp, using
+# Telegram's HTML parse mode (safer than Markdown - no escaping surprises).
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
+
+def _telegram_format(msg):
+    """Wrap the raw log message in a clean HTML card for Telegram."""
+    if msg.startswith("✅"):
+        label = "SUCCESS"
+    elif msg.startswith("⚠️"):
+        label = "WARNING"
+    elif msg.startswith("❌") or msg.startswith("🔥"):
+        label = "ERROR"
+    elif msg.startswith("♻️") or msg.startswith("🔄") or msg.startswith("🛑"):
+        label = "SYSTEM"
+    else:
+        label = "INFO"
+
+    ts = now().strftime("%Y-%m-%d %H:%M:%S")
+    safe_msg = (
+        msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    return f"<b>🤖 FB Auto-Bot — {label}</b>\n<code>{ts}</code>\n\n{safe_msg}"
+
+
+def send_telegram_message(msg, retries=2):
+    """Sends a message to Telegram, chunked to fit the 4096 char limit, with retries."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return
+    text = _telegram_format(msg)
+    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)] or [text]
+    for chunk in chunks:
+        for attempt in range(1, retries + 1):
+            try:
+                r = requests.post(
+                    TELEGRAM_API_URL,
+                    json={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": chunk,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if r.status_code == 200:
+                    break
+                print(f"log() Telegram HTTP {r.status_code} (attempt {attempt}/{retries}): {r.text[:300]}")
+            except Exception as e:
+                print(f"log() failed to reach Telegram (attempt {attempt}/{retries}): {e}")
+            time.sleep(2)
+
+
+# ================= TELEGRAM PHOTO NOTIFICATIONS (NEW) =================
+# Sends the actual uploaded photo to Telegram, with a details caption. Used
+# only for the "full post details" notification below - never touches the
+# existing text-only log()/send_telegram_message() path, so nothing about
+# current notifications changes.
+TELEGRAM_PHOTO_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+
+
+def send_telegram_photo(image_bytes, caption, retries=2):
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return False
+    # Telegram caption limit is 1024 chars for photo messages.
+    safe_caption = caption[:1024]
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.post(
+                TELEGRAM_PHOTO_API_URL,
+                data={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "caption": safe_caption,
+                    "parse_mode": "HTML",
+                },
+                files={"photo": ("post.jpg", image_bytes, "image/jpeg")},
+                timeout=REQUEST_TIMEOUT,
+            )
+            if r.status_code == 200:
+                return True
+            print(f"send_telegram_photo HTTP {r.status_code} (attempt {attempt}/{retries}): {r.text[:300]}")
+        except Exception as e:
+            print(f"send_telegram_photo failed to reach Telegram (attempt {attempt}/{retries}): {e}")
+        time.sleep(2)
+    return False
+
+
+# ================= TELEGRAM ON-DEMAND COMMANDS (NEW) =================
+# Lets you ASK the bot for stats any time by texting it in Telegram, instead
+# of only getting push notifications. Uses long-polling (getUpdates) - no
+# webhook or public URL/port needed, so it works fine on a plain VPS. The
+# offset is persisted in bot_state.json so a restart doesn't replay old
+# messages. Only replies to messages from TELEGRAM_CHAT_ID (i.e. you).
+TELEGRAM_GETUPDATES_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+telegram_update_offset = 0
+
+
+def build_stats_text():
+    """Live 'right now' snapshot of today's posts + engagement - separate
+    from the once-a-day daily_summary(), for on-demand /stats checks."""
+    if not daily_posted_posts:
+        return "📊 Today so far: no posts yet."
+    lines = [f"📊 Stats so far today ({now().strftime('%Y-%m-%d %H:%M')})",
+             f"Total posts: {len(daily_posted_posts)}"]
+    by_type = {}
+    for p in daily_posted_posts:
+        by_type[p["type"]] = by_type.get(p["type"], 0) + 1
+    for t, c in by_type.items():
+        lines.append(f"  - {t}: {c}")
+
+    total_likes = total_comments = total_shares = 0
+    any_data = False
+    for p in daily_posted_posts:
+        eng = get_post_engagement(p["id"])
+        if eng:
+            any_data = True
+            total_likes += eng["likes"]
+            total_comments += eng["comments"]
+            total_shares += eng["shares"]
+    if any_data:
+        lines.append(f"👍 {total_likes}  💬 {total_comments}  🔁 {total_shares} (all of today's posts combined)")
+    else:
+        lines.append("ℹ️ Engagement data unavailable (check Page Insights permission on the FB token).")
+    return "\n".join(lines)
+
+
+def build_categories_keyboard():
+    """NEW: builds the inline on/off button grid for the 5 post categories,
+    showing the current ON/OFF state on each button."""
+    buttons = []
+    for key, label in CATEGORY_LABELS.items():
+        state = "🟢 ON" if CATEGORY_ENABLED.get(key, True) else "🔴 OFF"
+        buttons.append([{
+            "text": f"{label} — {state}",
+            "callback_data": f"toggle_{key}",
+        }])
+    return {"inline_keyboard": buttons}
+
+
+def send_categories_message():
+    """NEW: sends the /categories message with the on/off button keyboard."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": "🎛️ Post category controls — tap to toggle ON/OFF:",
+                "reply_markup": build_categories_keyboard(),
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+    except Exception as e:
+        log(f"⚠️ send_categories_message failed: {e}")
+
+
+def answer_callback_query(callback_query_id, text=""):
+    """NEW: acknowledges a button tap so Telegram stops showing the loading spinner."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": callback_query_id, "text": text},
+            timeout=REQUEST_TIMEOUT,
+        )
+    except Exception as e:
+        log(f"⚠️ answer_callback_query failed: {e}")
+
+
+def update_categories_message(chat_id, message_id):
+    """NEW: refreshes the button grid in place after a toggle, so the message
+    always reflects the latest ON/OFF state instead of piling up new ones."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup",
+            json={
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": build_categories_keyboard(),
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+    except Exception as e:
+        log(f"⚠️ update_categories_message failed: {e}")
+
+
+def check_telegram_commands():
+    """Polls Telegram for new messages/button taps sent TO the bot and replies
+    to simple commands (/stats, /help, /categories) or toggles a category
+    on/off. Safe to call repeatedly - it only looks at updates newer than
+    telegram_update_offset."""
+    global telegram_update_offset
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return
+    try:
+        r = requests.get(
+            TELEGRAM_GETUPDATES_URL,
+            params={"offset": telegram_update_offset + 1, "timeout": 0},
+            timeout=REQUEST_TIMEOUT,
+        )
+        data = r.json()
+        if not data.get("ok"):
+            return
+        for update in data.get("result", []):
+            telegram_update_offset = max(telegram_update_offset, update["update_id"])
+
+            # NEW: handle button taps (callback queries) for category on/off toggles
+            cb = update.get("callback_query")
+            if cb:
+                cb_chat_id = str(cb.get("message", {}).get("chat", {}).get("id", ""))
+                if cb_chat_id != str(TELEGRAM_CHAT_ID):
+                    continue  # ignore anyone except you
+                cb_data = cb.get("data", "")
+                if cb_data.startswith("toggle_"):
+                    key = cb_data[len("toggle_"):]
+                    if key in CATEGORY_ENABLED:
+                        CATEGORY_ENABLED[key] = not CATEGORY_ENABLED[key]
+                        save_state()
+                        state_word = "ON ✅" if CATEGORY_ENABLED[key] else "OFF ⛔"
+                        answer_callback_query(cb["id"], f"{CATEGORY_LABELS[key]} turned {state_word}")
+                        message_id = cb.get("message", {}).get("message_id")
+                        if message_id:
+                            update_categories_message(cb_chat_id, message_id)
+                    else:
+                        answer_callback_query(cb["id"], "Unknown category")
+                continue
+
+            msg = update.get("message", {})
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+            text = (msg.get("text") or "").strip().lower()
+            if chat_id != str(TELEGRAM_CHAT_ID):
+                continue  # ignore anyone except you
+            if text in ("/stats", "/status"):
+                send_telegram_message(build_stats_text())
+            elif text in ("/categories", "/settings"):
+                send_categories_message()
+            elif text == "/help":
+                send_telegram_message(
+                    "🤖 Commands:\n"
+                    "/stats - today's posts + engagement so far\n"
+                    "/categories - on/off buttons for each post category\n"
+                    "/help - this message"
+                )
+    except Exception as e:
+        log(f"⚠️ check_telegram_commands failed: {e}")
+
+
 # ================= LOG =================
 def log(msg):
     print(msg)
@@ -289,10 +692,9 @@ def log(msg):
     except Exception as e:
         print(f"log() failed to write to file: {e}")
     try:
-        if DISCORD_WEBHOOK_URL:
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": msg[:1900]}, timeout=REQUEST_TIMEOUT)
+        send_telegram_message(msg)
     except Exception as e:
-        print(f"log() failed to reach Discord: {e}")
+        print(f"log() failed to reach Telegram: {e}")
 
 
 # ================= STARTUP VALIDATION (new) =================
@@ -397,11 +799,19 @@ news_last_fetch = 0
 # ================= AI NEWS =================
 def ai_generate(title, desc):
     text = call_gemini(f"""
-Create viral Facebook caption + image prompt JSON.
+Create a viral Facebook caption + a matching image prompt for this news story.
 
 NEWS:
 {title}
 {desc}
+
+Rules for image_prompt:
+- Describe a CONCRETE real-world scene that directly matches the specific
+  people, place, objects, or event in this news story - not a vague/generic
+  "news illustration"
+- Photojournalism style, realistic, highly detailed
+- Do NOT ask for any text, headlines, captions, logos, or writing to appear
+  in the image - text-in-image always renders broken
 
 Return:
 {{"caption":"...","image_prompt":"..."}}
@@ -433,11 +843,18 @@ Return:
 # ================= CARTOON =================
 def cartoon_generate(title, desc):
     text = call_gemini(f"""
-Editorial cartoon news illustration.
+Editorial cartoon news illustration for this story.
 
 NEWS:
 {title}
 {desc}
+
+Rules for image_prompt:
+- Depict the specific subject/situation of this news story, not a generic
+  newsroom scene
+- Satirical editorial cartoon style, bold outlines, exaggerated expressions
+- Do NOT ask for any text, speech bubbles, captions, or writing in the image -
+  text-in-image always renders broken/garbled
 
 Return JSON:
 {{"caption":"...","image_prompt":"..."}}
@@ -481,6 +898,8 @@ Rules:
 - Caption must be warm, heartfelt, and viral-friendly
 - Dark, moody, cinematic aesthetic
 - Unique artistic style — not generic stock photo
+- image_prompt must NOT ask for any text, words, or writing to appear in the
+  image - text-in-image always renders broken
 
 Return ONLY JSON:
 {{"caption":"...","image_prompt":"..."}}
@@ -512,7 +931,10 @@ def quote_generate():
     text = call_gemini(f"""
 Create an original, powerful, short inspirational quote about {topic}.
 It must NOT be a copy of any famous existing quote - write a brand new one.
-Also create a matching cinematic image prompt for a background image.
+Also create a matching cinematic BACKGROUND image prompt (mood/scenery only).
+The image_prompt must NOT ask for the quote text, any words, letters, or
+writing to appear in the image itself - the quote is added as a caption
+separately, and text rendered inside AI images always comes out broken.
 
 Return ONLY JSON:
 {{"quote":"...","author_style":"Original","image_prompt":"..."}}
@@ -556,7 +978,9 @@ def fact_generate():
     topic = random.choice(FACT_TOPICS)
     text = call_gemini(f"""
 Share ONE surprising, true, viral-worthy fun fact about {topic}.
-Keep it short and fascinating. Also create a matching realistic image prompt.
+Keep it short and fascinating. Also create a matching realistic image prompt
+that depicts the subject of the fact itself (no text/words/writing in the
+image - the fact is shown as a caption separately).
 
 Return ONLY JSON:
 {{"fact":"...","image_prompt":"..."}}
@@ -762,6 +1186,7 @@ CRITICAL RULES (follow ALL strictly):
 - Include specific weather/seasonal conditions that make {place} look its absolute best
 - Do NOT mention any other place names — ONLY describe {place}
 - Make it UNIQUE to {place} — not a generic description that could fit anywhere
+- Do NOT ask for any text, signs, labels, or writing to appear in the image
 - End with: "A flawless, pristine, highly photorealistic masterpiece with breathtaking detail"
 
 Return ONLY a single plain text string (NO JSON, NO markdown formatting, NO code blocks — just the prompt text):
@@ -805,30 +1230,85 @@ Return ONLY the caption text (no JSON, no markdown):
 
 
 # ================= IMAGE =================
-def generate_image(prompt):
-    # FIX: pollinations.ai caches/returns the same image for an identical prompt.
-    # Previously, whenever the fallback text ("news illustration" etc.) was used,
-    # EVERY post got the exact same cached picture. Adding a random seed + fixed
-    # dimensions guarantees a fresh image every single time, even if the prompt
-    # text itself repeats.
+# FIX (root cause of "wrong photo for the caption"):
+# The old code just built a pollinations.ai URL and handed it straight to
+# Facebook as `url=...`. Facebook then fetches that URL itself at publish
+# time - the bot never checked whether pollinations actually returned a real,
+# matching image. If pollinations was slow, rate-limited for a moment, or
+# returned a broken/blank/placeholder response (which free image APIs do
+# occasionally), Facebook would still get "something" and the post would go
+# out with a broken or unrelated picture next to a perfectly fine caption.
+# On top of that, giant over-stuffed prompts (see the old scenic prompt) make
+# the underlying model ignore half the instructions and drift off-topic.
+#
+# Fix: download the image ourselves, verify it is a real, reasonably-sized
+# image, and retry across models/seeds before giving up. We keep BOTH the
+# raw bytes (for a rock-solid direct upload to Facebook - no second fetch,
+# no chance of Facebook getting something different than what we checked)
+# and the URL (Instagram's API needs a public URL, not raw bytes).
+IMAGE_MIN_BYTES = 15000          # a real 1024x1024 photo is always bigger than this;
+                                  # broken/blank/error responses are almost always tiny
+POLLINATIONS_MODELS = ["flux", "turbo"]   # flux = best quality/prompt-following on
+                                           # pollinations right now; turbo = fast fallback
+MAX_IMAGE_PROMPT_CHARS = 900     # generous cap - just guards against runaway/broken
+                                  # prompts, without cutting well-formed detailed ones short
+
+
+def _fetch_pollinations_image(prompt, model):
     seed = random.randint(1, 999999999)
     encoded = urllib.parse.quote(prompt)
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&seed={seed}&nologo=true"
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width=1024&height=1024&seed={seed}&nologo=true&model={model}&enhance=true"
+    )
+    try:
+        r = requests.get(url, timeout=60)
+        content_type = r.headers.get("content-type", "")
+        if r.status_code == 200 and content_type.startswith("image/") and len(r.content) >= IMAGE_MIN_BYTES:
+            return r.content, url
+        log(f"⚠️ generate_image: bad response (model={model}, status={r.status_code}, "
+            f"content-type={content_type}, size={len(r.content) if r.content else 0} bytes)")
+    except Exception as e:
+        log(f"⚠️ generate_image: request failed (model={model}): {e}")
+    return None, None
+
+
+def generate_image(prompt):
+    prompt = (prompt or "").strip()
+    if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
+        prompt = prompt[:MAX_IMAGE_PROMPT_CHARS]
+    # never let the image model try to render words - text-in-image is the
+    # single biggest cause of garbled/obviously-wrong looking AI photos
+    prompt = f"{prompt}, no text, no words, no letters, no watermark, no logo"
+
+    for model in POLLINATIONS_MODELS:
+        for attempt in range(2):
+            content, url = _fetch_pollinations_image(prompt, model)
+            if content:
+                return {"bytes": content, "url": url}
+            time.sleep(2)
+
+    log("❌ generate_image: all attempts failed - no valid image could be generated for this post")
+    return None
 
 
 # ================= POST =================
-def _do_fb_post_request(caption, image_url, alt_text=None):
+def _do_fb_post_request(caption, image_bytes, alt_text=None):
+    # FIX: upload the exact bytes we already downloaded and validated in
+    # generate_image(), instead of passing a URL for Facebook to fetch on its
+    # own. This removes a second, unverified network hop that used to be the
+    # main source of caption/photo mismatches.
     url = f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos"
-    payload = {
-        "url": image_url,
+    data = {
         "caption": caption,
         "access_token": FB_ACCESS_TOKEN
     }
     if alt_text:
         # FIX/new: alt text improves accessibility and Facebook's own reach/SEO signals.
-        payload["alt_text_custom"] = alt_text[:200]
+        data["alt_text_custom"] = alt_text[:200]
 
-    return requests.post(url, data=payload, timeout=REQUEST_TIMEOUT).json()
+    files = {"source": ("post_image.jpg", image_bytes, "image/jpeg")}
+    return requests.post(url, data=data, files=files, timeout=REQUEST_TIMEOUT).json()
 
 
 # ================= INSTAGRAM CROSS-POST (NEW, optional) =================
@@ -883,17 +1363,28 @@ def post_instagram(caption, image_url):
 TRANSIENT_FB_ERROR_CODES = {4, 17, 32, 613}
 
 
-def post_fb(caption, image_url, alt_text=None, post_type="news"):
+def post_fb(caption, image, alt_text=None, post_type="news"):
+    # FIX: `image` is now the dict returned by generate_image() -
+    # {"bytes": ..., "url": ...} - or None if image generation totally failed
+    # after all retries. Previously a failed/broken image generation still
+    # got posted (as a broken picture); now we skip the post entirely and log
+    # it loudly, so you see it in Discord instead of a bad post going live.
+    if not image or not image.get("bytes"):
+        log(f"⏭️ Skipped {post_type} post - could not generate a valid image for it (see errors above).")
+        return {}
+
     result = {}
     for attempt in range(1, 4):
         try:
-            result = _do_fb_post_request(caption, image_url, alt_text)
+            result = _do_fb_post_request(caption, image["bytes"], alt_text)
 
             if "error" not in result:
                 # success -> track for analytics (NEW), then return exactly as before
                 if "id" in result:
                     track_posted_post(result["id"], post_type)
-                    post_instagram(caption, image_url)  # NEW: no-op unless IG_ACCOUNT_ID is set
+                    if image.get("url"):
+                        post_instagram(caption, image["url"])  # NEW: no-op unless IG_ACCOUNT_ID is set
+                    notify_post_to_telegram(result, post_type, caption, alt_text, image)  # NEW: full details + photo to Telegram
                 return result
 
             err = result["error"]
@@ -911,6 +1402,45 @@ def post_fb(caption, image_url, alt_text=None, post_type="news"):
             time.sleep(5 * attempt)
 
     return result
+
+
+# ================= FULL POST DETAILS -> TELEGRAM (NEW) =================
+# For every post that actually goes live on Facebook, sends a single detailed
+# Telegram message containing: what type of post it was, what it was based on
+# (the news/holiday/topic title used as alt_text, when available), the exact
+# caption that was published, a link to the live post, and the EXACT photo
+# that was uploaded. This is purely a notification - it is called only after
+# post_fb() has already succeeded, so it never changes what gets posted or
+# how/when it gets posted.
+def notify_post_to_telegram(result, post_type, caption, alt_text, image):
+    try:
+        post_id = result.get("id", "unknown")
+        ts = now().strftime("%Y-%m-%d %H:%M:%S")
+
+        def esc(t):
+            return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        details = (
+            f"<b>🆕 New Facebook Post Published</b>\n"
+            f"📌 <b>Post type:</b> {esc(post_type)}\n"
+            f"📝 <b>Based on:</b> {esc(alt_text) if alt_text else 'N/A'}\n"
+            f"🔗 <b>Link:</b> https://facebook.com/{post_id}\n"
+            f"🕒 <b>Time:</b> <code>{ts}</code>\n\n"
+            f"<b>Caption posted:</b>\n{esc(caption)}"
+        )
+
+        sent_as_photo = False
+        if image and image.get("bytes"):
+            sent_as_photo = send_telegram_photo(image["bytes"], details)
+
+        # If it couldn't be sent as a photo (no image, or Telegram rejected it),
+        # or the details were too long to fit in a photo caption (1024 char
+        # limit), also/instead send the full details as a plain text message
+        # so nothing is ever cut off or lost.
+        if not sent_as_photo or len(details) > 1024:
+            send_telegram_message(details)
+    except Exception as e:
+        log(f"⚠️ notify_post_to_telegram failed (Facebook post itself was not affected): {e}")
 
 
 # ================= ANALYTICS (NEW) =================
@@ -1048,6 +1578,9 @@ def scheduler():
                 daily_summary_posted = False
                 log("🔄 Daily reset done.")
 
+            # ===== TELEGRAM ON-DEMAND COMMANDS (NEW) =====
+            check_telegram_commands()
+
             # ===== AUTO REPLY TO COMMENTS =====
             process_auto_replies()
 
@@ -1057,14 +1590,19 @@ def scheduler():
                 holiday_title = HOLIDAYS[today_str]
                 holiday_data = holiday_generate(holiday_title)
                 img = generate_image(holiday_data["image_prompt"])
-                post_fb(holiday_data["caption"], img, alt_text=holiday_title, post_type="holiday")
-                holiday_posted_today = True
-                log(f"✅ Holiday post uploaded: {holiday_title}")
+                result = post_fb(holiday_data["caption"], img, alt_text=holiday_title, post_type="holiday")
+                if "id" in result:
+                    holiday_posted_today = True
+                    log(f"✅ Holiday post uploaded: {holiday_title}")
+                else:
+                    log(f"⚠️ Holiday post for {holiday_title} did not go out - will retry next loop.")
 
             # ===== REGULAR NEWS POSTS =====
             news_list = get_news()
 
             for i, (h, m) in enumerate(TIME_SLOTS):
+                if not CATEGORY_ENABLED["news"]:
+                    continue
                 if i in posted_slots:
                     continue
                 t = now()
@@ -1092,6 +1630,8 @@ def scheduler():
 
             # ===== SCENIC POSTS =====
             for i, (h, m) in enumerate(SCENIC_SLOTS):
+                if not CATEGORY_ENABLED["scenic"]:
+                    continue
                 if i in posted_scenic_slots:
                     continue
                 t = now()
@@ -1104,6 +1644,8 @@ def scheduler():
 
             # ===== CARTOON POSTS =====
             for i, (h, m) in enumerate(CARTOON_SLOTS):
+                if not CATEGORY_ENABLED["cartoon"]:
+                    continue
                 if i in posted_cartoon_slots:
                     continue
                 t = now()
@@ -1131,6 +1673,8 @@ def scheduler():
 
             # ===== QUOTE OF THE DAY POSTS (NEW) =====
             for i, (h, m) in enumerate(QUOTE_SLOTS):
+                if not CATEGORY_ENABLED["quote"]:
+                    continue
                 if i in posted_quote_slots:
                     continue
                 t = now()
@@ -1151,6 +1695,8 @@ def scheduler():
 
             # ===== FUN FACT POSTS (NEW) =====
             for i, (h, m) in enumerate(FACT_SLOTS):
+                if not CATEGORY_ENABLED["fact"]:
+                    continue
                 if i in posted_fact_slots:
                     continue
                 t = now()
