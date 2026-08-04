@@ -9,6 +9,7 @@ import os
 import sys
 import signal
 import logging
+import base64
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from flask import Flask
@@ -98,6 +99,7 @@ def load_state():
     global daily_posted_posts, daily_summary_posted, weekly_history, weekly_summary_posted_on
     global telegram_update_offset
     global CATEGORY_ENABLED
+    global last_reset_date
 
     if not os.path.exists(STATE_FILE):
         return
@@ -129,11 +131,17 @@ def load_state():
         weekly_history = s.get("weekly_history", [])
         weekly_summary_posted_on = s.get("weekly_summary_posted_on")
         telegram_update_offset = s.get("telegram_update_offset", 0)
+        last_reset_date = s.get("last_reset_date")
 
         saved_categories = s.get("category_enabled")
         if saved_categories:
             for k in CATEGORY_ENABLED:
                 CATEGORY_ENABLED[k] = saved_categories.get(k, CATEGORY_ENABLED[k])
+
+        saved_streaks = s.get("category_fail_streak")
+        if saved_streaks:
+            for k in category_fail_streak:
+                category_fail_streak[k] = saved_streaks.get(k, category_fail_streak[k])
 
         log("♻️ Restored bot state from previous run.")
     except Exception as e:
@@ -167,6 +175,8 @@ def save_state():
             "weekly_summary_posted_on": weekly_summary_posted_on,
             "telegram_update_offset": telegram_update_offset,
             "category_enabled": CATEGORY_ENABLED,
+            "last_reset_date": last_reset_date,
+            "category_fail_streak": category_fail_streak,
         }
         with open(STATE_FILE, "w") as f:
             json.dump(s, f)
@@ -200,6 +210,41 @@ HASHTAG_POOL = [
 
 def pick_hashtags(n=4):
     return " ".join(random.sample(HASHTAG_POOL, min(n, len(HASHTAG_POOL))))
+
+
+# ================= ENGAGEMENT CTA (NEW) =================
+# Cartoon posts already ended with "💬 What do you think?" - this gives
+# News/Quote/Fact posts the same kind of comment-inviting line (rotated so it
+# doesn't look copy-pasted every time). More comments = more reach signal to
+# Facebook's algorithm. Purely additive - nothing existing is modified.
+ENGAGEMENT_CTAS = [
+    "💬 What do you think?",
+    "💬 Let us know in the comments!",
+    "💬 Agree or disagree? Tell us below!",
+    "💬 Share your thoughts in the comments!",
+]
+
+
+def pick_engagement_cta():
+    return random.choice(ENGAGEMENT_CTAS)
+
+
+# ================= FOLLOW/SHARE REMINDER (NEW) =================
+# Occasionally (not every post - that would look spammy) reminds people to
+# follow/share the Page. Applied centrally in post_fb() so it works for every
+# category automatically without editing each content generator.
+FOLLOW_REMINDERS = [
+    "👉 Follow this Page for more!",
+    "🔔 Hit Follow so you don't miss the next one!",
+    "❤️ Like & Share if you enjoyed this!",
+]
+FOLLOW_REMINDER_CHANCE = 0.25  # roughly 1 in 4 posts
+
+
+def maybe_add_follow_reminder(caption):
+    if random.random() < FOLLOW_REMINDER_CHANCE:
+        return f"{caption}\n\n{random.choice(FOLLOW_REMINDERS)}"
+    return caption
 
 
 def pick_hashtags_smart(context_text, n=4):
@@ -400,12 +445,20 @@ CATEGORY_LABELS = {
     "fact": "🧠 Fact",
 }
 
+# ================= CATEGORY DOWN ALERT (NEW) =================
+# Tracks, per category, how many consecutive days it was ON but posted
+# NOTHING (e.g. image generation kept failing, API key expired, etc.) so you
+# get warned instead of silently losing a whole category for days.
+category_fail_streak = {"news": 0, "scenic": 0, "cartoon": 0, "quote": 0, "fact": 0}
+CATEGORY_DOWN_ALERT_THRESHOLD = 2  # days
+
 seen_news_regular = set()
 seen_news_cartoon = set()
 seen_quotes_today = set()    # NEW
 seen_facts_today = set()     # NEW
 
 MAX_SEEN_NEWS = 500  # FIX: these sets grew forever (memory leak on long uptime). Cap them.
+MAX_REPLIED_COMMENT_IDS = 3000  # FIX: same idea for replied-comment tracking (see below)
 
 
 def remember_news(seen_set, title):
@@ -434,6 +487,9 @@ daily_posted_posts = []       # [{"id":..., "type":..., "time": iso_string}, ...
 daily_summary_posted = False  # resets daily
 weekly_history = []           # NEW: [{"date":..., "total":..., "by_type":{...}}, ...] rolling 7 days
 weekly_summary_posted_on = None  # NEW: date string of last weekly digest, to avoid double-posting
+last_reset_date = None  # FIX: date string of the last daily reset, so the reset block
+                         # (and its Telegram log message) only fires ONCE per day instead
+                         # of once every scheduler loop (~15x) during the 00:00-00:05 window
 
 
 # ================= TELEGRAM NOTIFICATIONS (NEW - replaces Discord) =================
@@ -625,9 +681,9 @@ def update_categories_message(chat_id, message_id):
 
 def check_telegram_commands():
     """Polls Telegram for new messages/button taps sent TO the bot and replies
-    to simple commands (/stats, /help, /categories) or toggles a category
-    on/off. Safe to call repeatedly - it only looks at updates newer than
-    telegram_update_offset."""
+    to simple commands (/stats, /help, /categories, /reach) or toggles a
+    category on/off. Safe to call repeatedly - it only looks at updates newer
+    than telegram_update_offset."""
     global telegram_update_offset
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
         return
@@ -671,12 +727,15 @@ def check_telegram_commands():
                 continue  # ignore anyone except you
             if text in ("/stats", "/status"):
                 send_telegram_message(build_stats_text())
+            elif text in ("/reach", "/why", "/diagnostics"):
+                send_telegram_message(build_reach_report_text())  # NEW: see below - explains WHY reach/likes are low
             elif text in ("/categories", "/settings"):
                 send_categories_message()
             elif text == "/help":
                 send_telegram_message(
                     "🤖 Commands:\n"
                     "/stats - today's posts + engagement so far\n"
+                    "/reach - WHY reach/likes are low (page size, real reach data)\n"
                     "/categories - on/off buttons for each post category\n"
                     "/help - this message"
                 )
@@ -820,7 +879,7 @@ Return:
     if text:
         try:
             result = extract_json(text)
-            caption = f"{result['caption']}\n\n{pick_hashtags_smart(title)}"
+            caption = f"{result['caption']}\n\n{pick_engagement_cta()}\n\n{pick_hashtags_smart(title)}"
             result["caption"] = apply_monetization(caption)
             return result
         except Exception as e:
@@ -835,7 +894,7 @@ Return:
         "high-contrast newspaper front-page illustration"
     ])
     return {
-        "caption": apply_monetization(f"📰 {title}\n\n{pick_hashtags()}"),
+        "caption": apply_monetization(f"📰 {title}\n\n{pick_engagement_cta()}\n\n{pick_hashtags()}"),
         "image_prompt": f"{title}, {style}, highly detailed, 4k"
     }
 
@@ -958,7 +1017,7 @@ Return ONLY JSON:
             f"inspirational mood, highly detailed, 4k"
         )
 
-    caption = f"💭 \"{quote_text}\"\n\n{pick_hashtags()}"
+    caption = f"💭 \"{quote_text}\"\n\n{pick_engagement_cta()}\n\n{pick_hashtags()}"
     return {
         "caption": apply_monetization(caption),
         "image_prompt": image_prompt,
@@ -1001,7 +1060,7 @@ Return ONLY JSON:
     if not image_prompt:
         image_prompt = f"Realistic detailed photograph representing {topic}, high quality, 4k"
 
-    caption = f"🤯 Fun Fact:\n{fact_text}\n\n{pick_hashtags()}"
+    caption = f"🤯 Fun Fact:\n{fact_text}\n\n{pick_engagement_cta()}\n\n{pick_hashtags()}"
     return {
         "caption": apply_monetization(caption),
         "image_prompt": image_prompt,
@@ -1091,6 +1150,14 @@ def process_auto_replies():
         cid = comment["id"]
         if cid not in last_replied_comment_ids:
             last_replied_comment_ids.add(cid)
+            # FIX: previously this set got wiped every midnight, which meant a
+            # comment already replied to yesterday (but still visible in the
+            # feed today) could get a SECOND auto-reply. Now it's never reset -
+            # instead it's capped like seen_news, so memory still can't grow
+            # forever, but "already replied" is remembered permanently.
+            if len(last_replied_comment_ids) > MAX_REPLIED_COMMENT_IDS:
+                for old_id in list(last_replied_comment_ids)[: len(last_replied_comment_ids) - MAX_REPLIED_COMMENT_IDS]:
+                    last_replied_comment_ids.discard(old_id)
             message = comment.get("message", "")
 
             # NEW: check for spam/abuse before replying. On any classification
@@ -1288,8 +1355,95 @@ def generate_image(prompt):
                 return {"bytes": content, "url": url}
             time.sleep(2)
 
-    log("❌ generate_image: all attempts failed - no valid image could be generated for this post")
+    # NEW: pollinations.ai completely failed (all models/attempts) - try a
+    # second, independent free image service before giving up entirely, so a
+    # single provider outage doesn't cause the post to be skipped.
+    log("⚠️ generate_image: pollinations.ai failed, trying Stable Horde backup...")
+    content, url = _fetch_stablehorde_image(prompt)
+    if content:
+        log("✅ generate_image: Stable Horde backup succeeded")
+        return {"bytes": content, "url": url}
+
+    log("❌ generate_image: all attempts failed (including backup) - no valid image could be generated for this post")
     return None
+
+
+# ================= BACKUP IMAGE SOURCE (NEW) =================
+# Stable Horde is a free, crowd-sourced Stable Diffusion API that works with
+# the public anonymous key (no signup/API key needed) - slower and lower
+# priority than a paid key, but it means an outage on pollinations.ai no
+# longer causes that slot's post to be skipped for the whole day. Only ever
+# called AFTER pollinations has fully failed - the normal/primary path never
+# touches this.
+STABLEHORDE_API_KEY = os.getenv("STABLEHORDE_API_KEY", "0000000000")  # anonymous key
+STABLEHORDE_POLL_TIMEOUT = 90  # seconds - generous, since this only runs as a last resort
+
+
+def _fetch_stablehorde_image(prompt):
+    try:
+        submit = requests.post(
+            "https://stablehorde.net/api/v2/generate/async",
+            headers={"apikey": STABLEHORDE_API_KEY, "Content-Type": "application/json"},
+            json={
+                "prompt": prompt,
+                "params": {"width": 1024, "height": 1024, "steps": 25, "n": 1},
+                "nsfw": False,
+                "censor_nsfw": True,
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        if submit.status_code not in (200, 202):
+            log(f"⚠️ Stable Horde submit failed: HTTP {submit.status_code}")
+            return None, None
+        job_id = submit.json().get("id")
+        if not job_id:
+            return None, None
+
+        waited = 0
+        done = False
+        while waited < STABLEHORDE_POLL_TIMEOUT:
+            time.sleep(5)
+            waited += 5
+            check = requests.get(
+                f"https://stablehorde.net/api/v2/generate/check/{job_id}", timeout=REQUEST_TIMEOUT
+            ).json()
+            if check.get("done"):
+                done = True
+                break
+            if check.get("faulted"):
+                log("⚠️ Stable Horde job faulted")
+                return None, None
+        if not done:
+            log("⚠️ Stable Horde timed out waiting for image")
+            return None, None
+
+        status = requests.get(
+            f"https://stablehorde.net/api/v2/generate/status/{job_id}", timeout=REQUEST_TIMEOUT
+        ).json()
+        generations = status.get("generations", [])
+        if not generations:
+            return None, None
+        img_field = generations[0].get("img")
+        if not img_field:
+            return None, None
+
+        if img_field.startswith("http"):
+            img_resp = requests.get(img_field, timeout=60)
+            content = img_resp.content if img_resp.status_code == 200 else None
+            url = img_field
+        else:
+            try:
+                content = base64.b64decode(img_field)
+            except Exception:
+                content = None
+            url = None
+
+        if content and len(content) >= IMAGE_MIN_BYTES:
+            return content, url
+        return None, None
+    except Exception as e:
+        log(f"⚠️ Stable Horde fallback failed: {e}")
+        return None, None
 
 
 # ================= POST =================
@@ -1372,6 +1526,8 @@ def post_fb(caption, image, alt_text=None, post_type="news"):
     if not image or not image.get("bytes"):
         log(f"⏭️ Skipped {post_type} post - could not generate a valid image for it (see errors above).")
         return {}
+
+    caption = maybe_add_follow_reminder(caption)  # NEW: ~1 in 4 posts gets a follow/share nudge
 
     result = {}
     for attempt in range(1, 4):
@@ -1465,10 +1621,106 @@ def get_post_engagement(post_id):
         likes = r.get("likes", {}).get("summary", {}).get("total_count", 0)
         comments = r.get("comments", {}).get("summary", {}).get("total_count", 0)
         shares = r.get("shares", {}).get("count", 0)
-        return {"likes": likes, "comments": comments, "shares": shares}
+        reach = get_post_reach(post_id)  # NEW: actual "how many people saw it" figure
+        return {"likes": likes, "comments": comments, "shares": shares, "reach": reach}
     except Exception as e:
         log(f"⚠️ get_post_engagement failed for {post_id}: {e}")
         return None
+
+
+# ================= REACH / PAGE DIAGNOSTICS (NEW) =================
+# Purely read-only informational additions - answers "did anyone actually SEE
+# the post" (reach) separately from "did anyone like it" (engagement), and
+# reports how many people even follow the Page. This never changes what gets
+# posted or when; it only adds a way to see WHY engagement might be low.
+def get_post_reach(post_id):
+    """Returns unique reach (accounts that saw the post) if the Page has
+    access to Page Insights, else None. Facebook only exposes this metric
+    once a Page has enough followers/activity, so None is expected and
+    normal for a brand-new Page - that itself is diagnostic information."""
+    try:
+        url = (f"https://graph.facebook.com/v20.0/{post_id}/insights"
+               f"?metric=post_impressions_unique&access_token={FB_ACCESS_TOKEN}")
+        r = requests.get(url, timeout=REQUEST_TIMEOUT).json()
+        if "error" in r:
+            return None
+        data = r.get("data", [])
+        if data and data[0].get("values"):
+            return data[0]["values"][0].get("value")
+        return None
+    except Exception:
+        return None
+
+
+def get_page_diagnostics():
+    """Returns the Page's current follower/like count, or None on failure.
+    This is usually the single biggest factor behind '0 likes': a post can
+    only be liked by people who (a) follow the Page and (b) are shown it by
+    Facebook's algorithm - if fan_count is very low, 0 likes is expected
+    regardless of content quality."""
+    try:
+        url = (f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}"
+               f"?fields=name,fan_count,followers_count,verification_status"
+               f"&access_token={FB_ACCESS_TOKEN}")
+        r = requests.get(url, timeout=REQUEST_TIMEOUT).json()
+        if "error" in r:
+            log(f"⚠️ get_page_diagnostics FB error: {r['error']}")
+            return None
+        return r
+    except Exception as e:
+        log(f"⚠️ get_page_diagnostics failed: {e}")
+        return None
+
+
+def build_reach_report_text():
+    """NEW: builds the text for the /reach Telegram command - Page size plus
+    reach/likes for today's posts, so you can see whether the issue is 'no
+    followers yet' vs 'has followers but Facebook isn't showing them the
+    posts' vs 'people see it but don't engage'."""
+    lines = ["📡 Reach & Audience Report"]
+
+    page = get_page_diagnostics()
+    if page:
+        name = page.get("name", "?")
+        fans = page.get("fan_count")
+        followers = page.get("followers_count")
+        lines.append(f"Page: {name}")
+        if fans is not None:
+            lines.append(f"👥 Page likes (fan_count): {fans}")
+        if followers is not None:
+            lines.append(f"👤 Followers: {followers}")
+        if (fans or 0) < 100 and (followers or 0) < 100:
+            lines.append(
+                "⚠️ Under ~100 followers: Facebook's algorithm rarely shows "
+                "posts beyond your existing audience at this size, and some "
+                "Insights metrics (reach) may not be available yet either. "
+                "This alone fully explains 0 likes - it's not a content problem."
+            )
+    else:
+        lines.append("⚠️ Could not fetch Page follower count (check token permissions).")
+
+    if not daily_posted_posts:
+        lines.append("\nNo posts today yet to report reach for.")
+        return "\n".join(lines)
+
+    lines.append("\nToday's posts:")
+    any_reach = False
+    for p in daily_posted_posts[-10:]:
+        eng = get_post_engagement(p["id"]) or {}
+        reach = eng.get("reach")
+        if reach is not None:
+            any_reach = True
+        reach_str = reach if reach is not None else "n/a"
+        lines.append(
+            f"  [{p['type']}] 👀 reach: {reach_str}  👍 {eng.get('likes', '-')}  "
+            f"💬 {eng.get('comments', '-')}  🔁 {eng.get('shares', '-')}"
+        )
+    if not any_reach:
+        lines.append(
+            "\nℹ️ Reach data isn't available (needs Page Insights access, and "
+            "Facebook only unlocks it once a Page has enough followers/activity)."
+        )
+    return "\n".join(lines)
 
 
 def daily_summary():
@@ -1508,6 +1760,18 @@ def daily_summary():
         )
     else:
         lines.append("ℹ️ Engagement stats unavailable (check Page Insights permission on the FB token).")
+
+    # NEW: surface WHY reach/likes might be low right in the daily summary,
+    # instead of only via the on-demand /reach command - so you see the real
+    # cause (page size) automatically every day without having to ask.
+    page = get_page_diagnostics()
+    if page:
+        fans = page.get("fan_count")
+        followers = page.get("followers_count")
+        if fans is not None or followers is not None:
+            lines.append(f"👥 Page size: {fans if fans is not None else '?'} likes / {followers if followers is not None else '?'} followers")
+        if (fans or 0) < 100 and (followers or 0) < 100:
+            lines.append("⚠️ Low follower count is likely why engagement is near 0 - send /reach for details.")
 
     log("\n".join(lines))
 
@@ -1557,12 +1821,36 @@ def scheduler():
     global seen_news_regular, seen_news_cartoon, seen_quotes_today, seen_facts_today
     global holiday_posted_today, last_replied_comment_ids
     global daily_posted_posts, daily_summary_posted, weekly_history, weekly_summary_posted_on
+    global last_reset_date
 
     load_state()  # NEW: resume where we left off if the process restarted mid-day
 
     while True:
         try:
-            if reset_time():
+            if reset_time() and last_reset_date != now().strftime("%Y-%m-%d"):
+                # NEW: before wiping today's posted-slot tracking, check whether
+                # any ENABLED category posted absolutely nothing today (image
+                # gen kept failing, API key expired, etc.) and warn if it's been
+                # happening for multiple days in a row.
+                for cat, posted_set in [
+                    ("news", posted_slots), ("scenic", posted_scenic_slots),
+                    ("cartoon", posted_cartoon_slots), ("quote", posted_quote_slots),
+                    ("fact", posted_fact_slots),
+                ]:
+                    if not CATEGORY_ENABLED.get(cat, True):
+                        category_fail_streak[cat] = 0  # OFF on purpose - not a failure
+                        continue
+                    if len(posted_set) == 0:
+                        category_fail_streak[cat] = category_fail_streak.get(cat, 0) + 1
+                        if category_fail_streak[cat] >= CATEGORY_DOWN_ALERT_THRESHOLD:
+                            log(
+                                f"🚨 {CATEGORY_LABELS.get(cat, cat)} hasn't posted anything for "
+                                f"{category_fail_streak[cat]} day(s) in a row despite being ON - "
+                                f"check logs/errors for that category."
+                            )
+                    else:
+                        category_fail_streak[cat] = 0
+
                 posted_slots = set()
                 posted_scenic_slots = set()
                 posted_cartoon_slots = set()
@@ -1573,9 +1861,10 @@ def scheduler():
                 seen_quotes_today = set()
                 seen_facts_today = set()
                 holiday_posted_today = False
-                last_replied_comment_ids = set()
                 daily_posted_posts = []
                 daily_summary_posted = False
+                last_reset_date = now().strftime("%Y-%m-%d")  # FIX: marks today as already reset,
+                                                                # so this block runs once, not ~15x
                 log("🔄 Daily reset done.")
 
             # ===== TELEGRAM ON-DEMAND COMMANDS (NEW) =====
