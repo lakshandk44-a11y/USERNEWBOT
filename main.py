@@ -766,6 +766,15 @@ def validate_config():
         log(f"⚠️ Missing required environment variables: {', '.join(missing)}. "
             f"The bot will run but posting/AI generation will fail until these are set on Railway.")
 
+    # NEW: one-time startup note (not per-post, so no log spam) about which
+    # image source is active - helps you confirm Cloudflare picked up your
+    # CF_ACCOUNT_ID/CF_API_TOKEN correctly after setting them.
+    if CF_ACCOUNT_ID and CF_API_TOKEN:
+        log("🖼️ Image source: Cloudflare Workers AI (primary), pollinations.ai + Stable Horde as fallback.")
+    else:
+        log("🖼️ Image source: pollinations.ai (primary), Stable Horde as fallback. "
+            "Set CF_ACCOUNT_ID + CF_API_TOKEN to switch to higher-quality Cloudflare Workers AI as primary.")
+
 
 # ================= GEMINI CALL HELPER (new, replaces silent `except:` everywhere) =================
 def call_gemini(prompt, retries=3, label="gemini"):
@@ -776,7 +785,11 @@ def call_gemini(prompt, retries=3, label="gemini"):
     This was the actual root cause of the bug where every post fell back
     to a generic "News Update" caption + generic image.
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # FIX: gemini-2.5-flash now returns HTTP 404 ("no longer available to new
+    # users") for any API key/project that didn't already use it before -
+    # Google restricted it. gemini-3.5-flash is the current, active model
+    # with a free tier, confirmed working for new keys.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
 
     for attempt in range(1, retries + 1):
         try:
@@ -1320,6 +1333,53 @@ POLLINATIONS_MODELS = ["flux", "turbo"]   # flux = best quality/prompt-following
 MAX_IMAGE_PROMPT_CHARS = 900     # generous cap - just guards against runaway/broken
                                   # prompts, without cutting well-formed detailed ones short
 
+# ================= CLOUDFLARE WORKERS AI (NEW - PRIMARY IMAGE SOURCE) =================
+# Free, generous (10,000 "neurons"/day - far more than this bot's handful of
+# posts/day needs) and noticeably higher quality than pollinations.ai, since it
+# runs the actual FLUX.1-schnell / Stable Diffusion XL models. Requires a free
+# Cloudflare account (no credit card) - set CF_ACCOUNT_ID and CF_API_TOKEN as
+# env vars. If those two aren't set, this is skipped entirely and the bot
+# falls back to pollinations.ai exactly as before - nothing breaks for anyone
+# who hasn't set them up yet.
+CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID", "")
+CF_API_TOKEN = os.getenv("CF_API_TOKEN", "")
+CLOUDFLARE_MODELS = [
+    "@cf/black-forest-labs/flux-1-schnell",           # best quality, fast
+    "@cf/stabilityai/stable-diffusion-xl-base-1.0",   # secondary CF model
+]
+
+
+def _fetch_cloudflare_image(prompt, model):
+    try:
+        r = requests.post(
+            f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/run/{model}",
+            headers={"Authorization": f"Bearer {CF_API_TOKEN}", "Content-Type": "application/json"},
+            json={"prompt": prompt},
+            timeout=60,
+        )
+        content_type = r.headers.get("content-type", "")
+        # Some Cloudflare image models return raw image bytes directly...
+        if r.status_code == 200 and content_type.startswith("image/") and len(r.content) >= IMAGE_MIN_BYTES:
+            return r.content
+        # ...others return JSON with a base64-encoded image inside "result".
+        if r.status_code == 200 and content_type.startswith("application/json"):
+            data = r.json()
+            if not data.get("success", True):
+                log(f"⚠️ Cloudflare image gen failed (model={model}): {data.get('errors')}")
+                return None
+            b64 = data.get("result", {}).get("image")
+            if b64:
+                content = base64.b64decode(b64)
+                if len(content) >= IMAGE_MIN_BYTES:
+                    return content
+            return None
+        log(f"⚠️ Cloudflare image gen bad response (model={model}, status={r.status_code}, "
+            f"content-type={content_type})")
+        return None
+    except Exception as e:
+        log(f"⚠️ Cloudflare image gen request failed (model={model}): {e}")
+        return None
+
 
 def _fetch_pollinations_image(prompt, model):
     seed = random.randint(1, 999999999)
@@ -1348,6 +1408,19 @@ def generate_image(prompt):
     # single biggest cause of garbled/obviously-wrong looking AI photos
     prompt = f"{prompt}, no text, no words, no letters, no watermark, no logo"
 
+    # 1) PRIMARY: Cloudflare Workers AI - higher quality, generous free daily
+    # budget. Cloudflare doesn't hand back a public image URL (only bytes), so
+    # "url" is None for these - Instagram cross-posting (which needs a public
+    # URL) is simply skipped for these images; the Facebook post itself is
+    # completely unaffected.
+    if CF_ACCOUNT_ID and CF_API_TOKEN:
+        for model in CLOUDFLARE_MODELS:
+            content = _fetch_cloudflare_image(prompt, model)
+            if content:
+                return {"bytes": content, "url": None}
+        log("⚠️ generate_image: Cloudflare Workers AI failed, falling back to pollinations.ai...")
+
+    # 2) SECONDARY: pollinations.ai (previous primary, kept as a fallback)
     for model in POLLINATIONS_MODELS:
         for attempt in range(2):
             content, url = _fetch_pollinations_image(prompt, model)
@@ -1355,16 +1428,14 @@ def generate_image(prompt):
                 return {"bytes": content, "url": url}
             time.sleep(2)
 
-    # NEW: pollinations.ai completely failed (all models/attempts) - try a
-    # second, independent free image service before giving up entirely, so a
-    # single provider outage doesn't cause the post to be skipped.
+    # 3) LAST RESORT: Stable Horde - only reached if both of the above failed
     log("⚠️ generate_image: pollinations.ai failed, trying Stable Horde backup...")
     content, url = _fetch_stablehorde_image(prompt)
     if content:
         log("✅ generate_image: Stable Horde backup succeeded")
         return {"bytes": content, "url": url}
 
-    log("❌ generate_image: all attempts failed (including backup) - no valid image could be generated for this post")
+    log("❌ generate_image: all attempts failed (including backups) - no valid image could be generated for this post")
     return None
 
 
