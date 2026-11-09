@@ -1,5 +1,8 @@
+edge-tts>=7.2.0
+gTTS
 requests
 feedparser
 pytz
 flask
 python-dotenv
+Pillow
